@@ -14,11 +14,12 @@ with a deterministic local scan (grep + `git ls-files` + `check_model_artifacts.
 
 | Target | Verdict |
 |--------|---------|
-| **Private publication (now)** | ✅ **READY** — zero blockers; safe to push to private `main`. |
-| **Public visibility (later)** | ⚠️ **READY_AFTER_FIXES** — one required fix: **add a LICENSE**. Everything else is clean. |
+| **Private publication** | ✅ **READY** — zero blockers; published to private `main`. |
+| **Public visibility (later)** | ✅ **READY** — the prior blocker (no LICENSE) is resolved (MIT `LICENSE` added; `pyproject` metadata polished). No remaining blockers. |
 
-> This repo is being published **private**. The single "blocker" below is a blocker to
-> *going public*, which is **not** being done now. Per instruction, no license was added.
+> **Update (2026-06-21):** the MIT `LICENSE` and `pyproject` metadata (`readme`/`license`/
+> `authors`/`urls`) have been added with operator approval. The repo is **kept PRIVATE** by
+> instruction, but is now technically clean to flip to public whenever the operator chooses.
 
 ---
 
@@ -97,24 +98,20 @@ Strong and unusually honest for a personal MVP; coverage of every required topic
 Spot-checks passed: "42 tests" is exact, CI uses `--tracked`, `schema_version=1`, the default
 env allow-list tuple matches `policy.py`. Tone is appropriately humble.
 
-## 6. License recommendation (recommendation only — not applied)
+## 6. License — RESOLVED
 
-The repo currently has **no LICENSE file** (README has a prose "personal-use, no guarantees"
-note only; default is therefore all-rights-reserved).
-- **If made public for reuse:** **MIT** is the simplest permissive fit for a small, stdlib-only,
-  personal-use utility, and matches the existing "as-is, no support" framing.
-- **If reuse should be forbidden:** keep it closed and add an explicit *all-rights-reserved*
-  `LICENSE` notice so the intent is deliberate rather than implicit.
+The repo is now licensed under the **MIT License** ([`LICENSE`](../LICENSE), copyright
+`fbratten`), and `pyproject.toml` declares `license = { text = "MIT" }` plus `readme`,
+`authors`, and `[project.urls]`. MIT was chosen as the simplest permissive fit for a small,
+stdlib-only, personal-use utility, consistent with the "as-is, no support" framing. Added with
+operator approval (2026-06-21).
 
-**No license was added or changed** in this audit (operator approval required).
+## 7. Exact blockers before switching to PUBLIC — NONE
 
-## 7. Exact blockers before switching to PUBLIC
-
-1. **Add a `LICENSE` file** (MIT recommended) and, optionally, set `pyproject [project].license`.
-   This is the **only** blocker — nothing else in the tree would leak or embarrass if public.
-
-**Optional (non-blocking) polish for a public repo:**
-- Add `readme`, `authors`, and `[project.urls]` to `pyproject.toml` (cosmetic metadata).
+The previously-identified single blocker (missing LICENSE) is **resolved**. No remaining
+blockers: secrets/runtime/model-artifact and local-path/internal-system scans are clean, docs
+are accurate and complete, and the license + metadata are in place. The repo is **kept
+PRIVATE** by operator instruction but is technically ready to be flipped public at any time.
 
 ---
 

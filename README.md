@@ -204,5 +204,6 @@ policies/catalogs; JSON works with the stdlib).
 
 ## License / status note
 
-Personal-use project. No support or compatibility guarantees. Future P2/P3/P4 work
-lands via feature branches + PRs against `main`.
+Licensed under the **MIT License** — see [`LICENSE`](LICENSE). Personal-use project,
+provided as-is with no support or compatibility guarantees. Future P2/P3/P4 work lands
+via feature branches + PRs against `main`.
