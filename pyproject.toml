@@ -1,9 +1,15 @@
 [project]
 name = "broker-lane-sandbox"
-version = "0.0.0"
+version = "0.1.0"
 description = "Safe execution + local/quantized model runtime boundary for broker lanes."
 requires-python = ">=3.10"
 dependencies = []   # stdlib-only core (P0/P1). Real runners are optional extras later.
+
+[project.optional-dependencies]
+yaml = ["pyyaml>=6"]   # optional: YAML policy/catalog. JSON path needs nothing.
+
+[project.scripts]
+bls = "broker_lane_sandbox.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

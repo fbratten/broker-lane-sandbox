@@ -15,9 +15,30 @@ boundary. **Separate project** from `project-broker-loom`.
 
 ## Status
 
-**P0 — repo invariants.** Model-artifact exclusion (`.gitignore` + guard + tests),
-manifests, policy docs. Safe-exec CLI core (policy schema, env scrub, network,
-limits) lands in P1; broker-loom seam in P2; local model runners in P3; streaming in P4.
+- **P0 — repo invariants** ✅ Model-artifact exclusion (`.gitignore` + guard + tests),
+  manifests, policy docs.
+- **P1 — safe-exec core** ✅ Default-deny `SandboxPolicy`, env scrubbing (secret guard +
+  offline proxy strip), POSIX rlimits + wall-clock timeout, machine-readable `ExecResult`,
+  preflight, and the `bls` CLI seam.
+- Broker-loom seam lands in P2; local model runners in P3; streaming in P4.
+
+## Safe-exec (`bls`) — default-deny
+
+Everything is forbidden until a policy explicitly allows it (`allow_exec=false`,
+empty command allow-list, `network=offline`, empty env). JSON in / JSON out:
+
+```bash
+bls version
+bls preflight --policy policy.example.json          # inspect posture, no execution
+bls run       --policy policy.example.json -- echo hi   # sandboxed run
+bls models                                           # list model manifests (no weights)
+```
+
+The child runs with a scrubbed env (only allow-listed, non-secret names; proxies
+stripped when offline), an isolated session, configured CPU/address-space/process
+rlimits, and a timeout that kills the whole process group. Policy denials are
+*results*, not crashes. Secret-looking env names (`*KEY*`, `*TOKEN*`, …) are dropped
+even if allow-listed, unless `allow_secret_env` is set.
 
 ## INVARIANT-1 — model artifacts are runtime cache only
 

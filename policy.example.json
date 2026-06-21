@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+
+  "_comment": "Default-deny example policy. Copy to a real .json and tighten. With allow_exec=false NOTHING runs; flip it and list exact command basenames to permit. The OPENROUTER_API_KEY-style secret guard drops secret-looking env names even if allow-listed.",
+
+  "allow_exec": true,
+  "allowed_commands": ["python3", "echo"],
+
+  "env_allowlist": ["PATH", "HOME", "LANG", "TZ", "TMPDIR"],
+  "env_passthrough_prefixes": [],
+  "allow_secret_env": false,
+
+  "network": "offline",
+
+  "timeout_seconds": 30,
+  "max_output_bytes": 1000000,
+  "cpu_seconds": 10,
+  "address_space_bytes": 1073741824,
+  "max_processes": 64,
+
+  "working_dir": null,
+  "model_dir_env": "SANDBOX_MODEL_DIR"
+}
