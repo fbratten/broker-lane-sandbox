@@ -34,6 +34,11 @@ FORBIDDEN_DIR_PREFIXES = (
 )
 
 VIOLATION_EXIT = 5
+GUARD_ERROR_EXIT = 2   # git/setup failure -- fail loud (closed), never report clean
+
+
+class GuardError(RuntimeError):
+    """A git/setup failure. The guard must fail closed, not silently report clean."""
 
 
 def _git(repo: str, *args: str) -> str:
@@ -41,11 +46,22 @@ def _git(repo: str, *args: str) -> str:
         ["git", "-C", repo, *args],
         capture_output=True, text=True,
     )
+    if out.returncode != 0:
+        # Do NOT swallow a git failure into empty output -- that would make the
+        # guard report a clean tree precisely when git is broken or run from the
+        # wrong directory (a fail-open bypass of INVARIANT-1).
+        raise GuardError(
+            f"git {' '.join(args)} failed (exit {out.returncode}) in {repo!r}: "
+            f"{out.stderr.strip()}"
+        )
     return out.stdout
 
 
 def _toplevel() -> str:
-    return _git(".", "rev-parse", "--show-toplevel").strip() or "."
+    top = _git(".", "rev-parse", "--show-toplevel").strip()
+    if not top:
+        raise GuardError("could not resolve git toplevel (not a git repository?)")
+    return top
 
 
 def _staged_files(repo: str) -> list[str]:
@@ -89,15 +105,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repo", default=None)
     args = ap.parse_args(argv)
 
-    repo = args.repo or _toplevel()
     max_bytes = int(args.max_mb * 1024 * 1024)
 
-    # Default to both scopes when neither flag is given.
-    scopes = []
-    if args.staged or not (args.staged or args.tracked):
-        scopes.append(("staged", _staged_files(repo)))
-    if args.tracked or not (args.staged or args.tracked):
-        scopes.append(("tracked", _tracked_files(repo)))
+    # Default to both scopes when neither flag is given. Any git failure here is a
+    # hard error (fail closed) -- never a silent clean pass.
+    try:
+        repo = args.repo or _toplevel()
+        scopes = []
+        if args.staged or not (args.staged or args.tracked):
+            scopes.append(("staged", _staged_files(repo)))
+        if args.tracked or not (args.staged or args.tracked):
+            scopes.append(("tracked", _tracked_files(repo)))
+    except GuardError as exc:
+        sys.stderr.write(f"GUARD ERROR (failing closed): {exc}\n")
+        return GUARD_ERROR_EXIT
 
     all_violations: list[str] = []
     for label, paths in scopes:

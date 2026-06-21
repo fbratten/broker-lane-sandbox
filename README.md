@@ -25,7 +25,9 @@ boundary. **Separate project** from `project-broker-loom`.
 ## Safe-exec (`bls`) — default-deny
 
 Everything is forbidden until a policy explicitly allows it (`allow_exec=false`,
-empty command allow-list, `network=offline`, empty env). JSON in / JSON out:
+empty command allow-list, `network=offline`, empty env). Commands are allow-listed
+by **bare name** (no path component) and resolved on `PATH`; a path-bearing `argv[0]`
+is refused so an allow-listed name can't front for an arbitrary file. JSON in / JSON out:
 
 ```bash
 bls version

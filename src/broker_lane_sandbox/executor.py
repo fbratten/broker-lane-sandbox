@@ -21,8 +21,10 @@ from pathlib import Path
 
 from .envscrub import build_child_env
 from .limits import build_preexec, limits_summary
-from .policy import SandboxPolicy
+from .policy import SandboxPolicy, is_bare_command
 from .result import ExecResult, Status
+
+_KILL_GRACE = 5.0  # seconds to wait for pipes to close after a timeout-kill
 
 
 class SafeExecutor:
@@ -38,10 +40,16 @@ class SafeExecutor:
             return ExecResult.denied(argv, "empty argv")
         if not policy.allow_exec:
             return ExecResult.denied(argv, "execution disabled (allow_exec is false)")
-        if not policy.is_command_allowed(argv[0]):
+        if not is_bare_command(argv[0]):
+            # A path-bearing argv[0] would let an allow-listed *basename* run an
+            # arbitrary file; only bare names (resolved on PATH) may pass the gate.
             return ExecResult.denied(
                 argv,
-                f"command {os.path.basename(argv[0])!r} not in allowed_commands",
+                f"argv[0] must be a bare command name with no path component: {argv[0]!r}",
+            )
+        if not policy.is_command_allowed(argv[0]):
+            return ExecResult.denied(
+                argv, f"command {argv[0]!r} not in allowed_commands",
             )
 
         # --- gate 3: working dir --------------------------------------------
@@ -68,7 +76,10 @@ class SafeExecutor:
                 preexec_fn=preexec,            # POSIX: setsid + rlimits; None elsewhere
                 close_fds=True,
             )
-        except (FileNotFoundError, PermissionError, OSError) as exc:
+        except (FileNotFoundError, PermissionError, OSError, subprocess.SubprocessError) as exc:
+            # SubprocessError covers a preexec/rlimit-setup failure (e.g. a requested
+            # rlimit above the host's inherited hard ceiling); it is NOT an OSError.
+            # A pre-spawn setup failure is a recoverable result, not a crash.
             return ExecResult.spawn_error(argv, f"could not start process: {exc}")
 
         timed_out = False
@@ -77,7 +88,7 @@ class SafeExecutor:
         except subprocess.TimeoutExpired:
             timed_out = True
             _kill_tree(proc)
-            stdout, stderr = proc.communicate()
+            stdout, stderr = _drain_after_kill(proc)
 
         duration_ms = int((time.monotonic() - start) * 1000)
         stdout, t1 = _truncate(stdout, policy.max_output_bytes)
@@ -106,6 +117,26 @@ class SafeExecutor:
             env_keys=sorted(k for k in child_env),
             limits=limits,
         )
+
+
+def _drain_after_kill(proc: subprocess.Popen) -> tuple[str, str]:
+    """Bounded read after a timeout-kill.
+
+    A descendant that escaped the process group (own setsid / double-fork) and
+    inherited the stdout/stderr pipe can hold it open indefinitely. communicate()
+    with no timeout would block on that pipe forever, defeating the wall-clock
+    budget -- so the recovery read is time-boxed. If it still can't drain, we
+    abandon the output (the direct child is already SIGKILL'd) and reap it so run()
+    always returns within a bounded time.
+    """
+    try:
+        return proc.communicate(timeout=_KILL_GRACE)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.wait(timeout=_KILL_GRACE)
+        except subprocess.TimeoutExpired:
+            pass
+        return "", "[output abandoned: a descendant leaked past the process-group kill]"
 
 
 def _truncate(text: str, cap: int) -> tuple[str, bool]:

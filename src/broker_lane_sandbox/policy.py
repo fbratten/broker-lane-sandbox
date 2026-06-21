@@ -39,6 +39,21 @@ SECRET_NAME_RE = re.compile(
 _VALID_NETWORK = ("offline", "online")
 
 
+def is_bare_command(command: str) -> bool:
+    """True iff `command` is a bare name with no directory component.
+
+    Only a bare name can be soundly gated by a basename allow-list, because then
+    basename == the file PATH will resolve and execute. Anything with a path
+    separator (absolute or relative) is rejected to close the path-bypass where a
+    crafted ``/dir/python3`` slips an allow-listed *name* past the gate.
+    """
+    if not command:
+        return False
+    if command != os.path.basename(command):
+        return False
+    return "/" not in command and "\\" not in command
+
+
 @dataclass
 class SandboxPolicy:
     """A default-deny policy. Construct via `from_mapping` / `from_file`."""
@@ -125,11 +140,19 @@ class SandboxPolicy:
     # --- helpers consumed by env scrub / executor ---------------------------
 
     def is_command_allowed(self, command: str) -> bool:
-        """A command (path or bare name) is allowed iff its basename is allow-listed."""
+        """Allowed iff exec is enabled AND `command` is a bare name in the allow-list.
+
+        The allow-list gates by *name*, so argv[0] must BE its own basename (no path
+        component). A path-bearing argv[0] like ``/tmp/evil/python3`` would let the
+        basename ``python3`` pass while Popen executes an arbitrary file -- so it is
+        refused here. Bare names resolve through PATH, matching how preflight checks
+        availability. Identity/realpath pinning is intentionally out of scope.
+        """
         if not self.allow_exec:
             return False
-        base = os.path.basename(command)
-        return base in self.allowed_commands
+        if not is_bare_command(command):
+            return False
+        return command in self.allowed_commands
 
 
 def _load_yaml(text: str, path: Path) -> dict:

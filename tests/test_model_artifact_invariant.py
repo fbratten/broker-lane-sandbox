@@ -97,3 +97,17 @@ def test_real_repo_tracked_tree_is_clean():
         capture_output=True, text=True,
     )
     assert cp.returncode == 0, cp.stderr
+
+
+def test_guard_fails_closed_when_git_unavailable(tmp_path):
+    # Run from a NON-repo dir with no --repo: git resolution fails. The guard must
+    # fail CLOSED (non-zero), never silently report a clean tree (INVARIANT-1).
+    non_repo = tmp_path / "not-a-repo"
+    non_repo.mkdir()
+    cp = subprocess.run(
+        [sys.executable, str(GUARD), "--tracked"],
+        cwd=non_repo, capture_output=True, text=True,
+    )
+    assert cp.returncode != 0                       # NOT a false-clean exit 0
+    assert cp.returncode == 2                       # GUARD_ERROR_EXIT
+    assert "GUARD ERROR" in cp.stderr
