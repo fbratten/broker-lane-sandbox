@@ -116,7 +116,9 @@ def main(argv: list[str] | None = None) -> int:
             scopes.append(("staged", _staged_files(repo)))
         if args.tracked or not (args.staged or args.tracked):
             scopes.append(("tracked", _tracked_files(repo)))
-    except GuardError as exc:
+    except (GuardError, FileNotFoundError, OSError) as exc:
+        # FileNotFoundError covers git missing from PATH entirely; OSError covers
+        # other exec failures. All fail CLOSED with a clear message (never exit 0).
         sys.stderr.write(f"GUARD ERROR (failing closed): {exc}\n")
         return GUARD_ERROR_EXIT
 

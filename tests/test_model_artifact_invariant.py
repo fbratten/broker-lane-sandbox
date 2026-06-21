@@ -3,6 +3,7 @@
 Each scenario runs against a throwaway git repo so behavior is deterministic and
 independent of this repo's own commit state. The real tracked tree is also audited.
 """
+import os
 import shutil
 import subprocess
 import sys
@@ -110,4 +111,18 @@ def test_guard_fails_closed_when_git_unavailable(tmp_path):
     )
     assert cp.returncode != 0                       # NOT a false-clean exit 0
     assert cp.returncode == 2                       # GUARD_ERROR_EXIT
+    assert "GUARD ERROR" in cp.stderr
+
+
+def test_guard_fails_closed_when_git_binary_absent(tmp_path):
+    # git missing from PATH entirely -> FileNotFoundError must still fail CLOSED
+    # (exit 2 + friendly message), never a raw traceback or a false-clean exit 0.
+    empty_bin = tmp_path / "bin"          # a PATH with no git on it
+    empty_bin.mkdir()
+    env = dict(os.environ, PATH=str(empty_bin))
+    cp = subprocess.run(
+        [sys.executable, str(GUARD), "--tracked", "--repo", str(REPO_ROOT)],
+        env=env, capture_output=True, text=True,
+    )
+    assert cp.returncode == 2                        # GUARD_ERROR_EXIT, fail closed
     assert "GUARD ERROR" in cp.stderr
