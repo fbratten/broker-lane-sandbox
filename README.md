@@ -143,6 +143,16 @@ removal, **not** a kernel network namespace. `network: "online"` opts out (sets
 `SANDBOX_NETWORK=online`, leaves proxies intact). Fetching model weights is a separate,
 explicit, online step; **execution runs offline**.
 
+## Security & threat model
+
+The sandbox confines the **child** it spawns (a subprocess / future model or agent lane);
+the **caller** that writes the policy and `argv` is trusted. It is a **default-deny
+guardrail + bounded executor**, **not** a kernel/container sandbox: there is no filesystem
+jail, network "offline" is best-effort env-level neutralization, and command identity is
+not pinned (the invocation name is gated and resolved on `PATH`). Full asset list, trust
+boundaries, attacker model, per-risk mitigations, and known limitations:
+**[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md)**.
+
 ## CLI usage (`bls`)
 
 JSON in / JSON out; exit code mirrors the outcome (0 ok, 1 ran-but-nonzero, 2

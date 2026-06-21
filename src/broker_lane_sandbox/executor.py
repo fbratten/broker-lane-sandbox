@@ -1,9 +1,11 @@
 """SafeExecutor -- the default-deny core that actually runs a command.
 
 Order of gates (all BEFORE any process is spawned):
-  1. allow_exec must be True              -> else DENIED
-  2. argv[0] basename must be allow-listed -> else DENIED
-  3. working_dir (if set) must exist       -> else SPAWN_ERROR
+  1. argv is non-empty                     -> else DENIED
+  2. allow_exec must be True               -> else DENIED
+  3. argv[0] is a bare command name        -> else DENIED (no path-bypass)
+  4. argv[0] is in allowed_commands        -> else DENIED
+  5. working_dir (if set) must exist       -> else SPAWN_ERROR
 
 Then the child is launched with a scrubbed env, an isolated session, configured
 rlimits, and a wall-clock timeout. On timeout the whole process group is killed.

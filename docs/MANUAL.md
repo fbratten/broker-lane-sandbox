@@ -157,6 +157,9 @@ These boundaries were confirmed by an adversarial review: the path-bypass, timeo
 rlimit-crash, and guard-fail-open defects were real and fixed; the kernel/identity-pinning
 asks were correctly classified as out-of-scope for this MVP.
 
+The full asset list, trust-boundary diagram, attacker model, per-risk mitigation table, and
+consolidated known-limitations live in **[THREAT_MODEL.md](THREAT_MODEL.md)**.
+
 ## 7. Worked examples
 
 A minimal policy (`policy.json`):

@@ -1,7 +1,7 @@
 # Model-Cache Policy (INVARIANT-1)
 
 Downloaded / local / quantized model weights are **runtime cache only**. They are
-never committed to git, never copied into SPINE `ai-memory`, handovers, docs, or
+never committed to git, and never copied into documentation, handover notes, or
 PR artifacts.
 
 ## What is forbidden in git
@@ -40,6 +40,8 @@ online step; execution runs offline** (see network policy). Execution never down
   - CI / audit (`--tracked`) — refuses any **tracked** blob.
   It also refuses oversize files (default 5 MB cap, `BLS_GUARD_MAX_MB`) and anything
   under a runtime cache directory. Even `git add -f weights.gguf` is refused.
+- **Exit codes:** `0` = clean · `5` = a forbidden artifact was found · `2` = git/setup
+  failure (the guard **fails closed** rather than reporting a false-clean tree).
 
 ## Tests
 
