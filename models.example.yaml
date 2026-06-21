@@ -1,0 +1,26 @@
+# broker-lane-sandbox — model profile catalog (EXAMPLE / template).
+# This file is TRACKED. It contains NO weights — only manifests:
+# source, checksum, license, runner, and an env-driven cache path.
+#
+# Copy to models.yaml (gitignored) and fill real values locally.
+# Local model files live under ${SANDBOX_MODEL_DIR} (runtime cache, never git).
+
+schema_version: 1
+
+cache_dir_env: SANDBOX_MODEL_DIR   # weights resolve under this env-provided root
+
+profiles:
+  # --- EXAMPLE local quantized profile (placeholder values) ---
+  example-small-instruct-gguf:
+    runner: llama.cpp            # llama.cpp | ollama | transformers
+    source: "https://example.invalid/models/example-small-instruct-Q4_K_M.gguf"
+    relative_path: "example/example-small-instruct-Q4_K_M.gguf"   # under SANDBOX_MODEL_DIR
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    size_bytes: 0
+    quantization: Q4_K_M
+    context_length: 8192
+    license: "EXAMPLE-LICENSE (record the real license + URL here)"
+    notes: "Placeholder. Real weights are fetched into the runtime cache, never committed."
+
+# NOTE: remote API models (e.g. OpenRouter :free slugs) are NOT managed here.
+# Those are broker-loom's OpenRouter verifier lane. This repo owns LOCAL execution only.

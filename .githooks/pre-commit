@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# broker-lane-sandbox pre-commit: refuse model artifacts (INVARIANT-1).
+# Enabled via: git config core.hooksPath .githooks
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+exec python3 "${ROOT}/scripts/check_model_artifacts.py" --staged

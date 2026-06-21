@@ -1,0 +1,31 @@
+# broker-lane-sandbox — model artifacts are runtime cache only (INVARIANT-1).
+# Weights, caches, and downloaded model files MUST NEVER be committed.
+# Track only manifests / profiles / checksums / URLs / license notes.
+
+# Runtime model cache directories
+models/
+model-cache/
+runtime/
+.cache/
+.huggingface/
+hf-cache/
+ollama/
+llama.cpp/
+
+# Model weight / serialized-model blobs
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+*.mlmodel
+*.ckpt
+*.tflite
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/

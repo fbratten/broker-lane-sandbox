@@ -1,0 +1,10 @@
+[project]
+name = "broker-lane-sandbox"
+version = "0.0.0"
+description = "Safe execution + local/quantized model runtime boundary for broker lanes."
+requires-python = ">=3.10"
+dependencies = []   # stdlib-only core (P0/P1). Real runners are optional extras later.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
