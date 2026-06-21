@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# Minimal token: CI only reads the repo (checkout); it never writes.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -14,7 +18,7 @@ jobs:
           python-version: "3.12"
       - name: Install test dependency
         run: python -m pip install --upgrade pytest
-      - name: Model-artifact guard (INVARIANT-1)
+      - name: Model-artifact guard (INVARIANT-1, --tracked)
         run: python3 scripts/check_model_artifacts.py --tracked
       - name: Tests
         run: python3 -m pytest tests/ -q
