@@ -104,3 +104,22 @@ def test_broker_run_cli_request_error_is_json(tmp_path, capsys) -> None:
     assert payload["status"] == "request_error"
     assert payload["ok"] is False
     assert "argv must be a non-empty list of strings" in payload["reason"]
+
+
+def test_broker_run_cli_error_preserves_request_id(tmp_path, capsys) -> None:
+    """A request_id present in a request that fails validation is echoed unchanged."""
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {"schema_version": 1, "request_id": "job-err", "policy": POLICY, "argv": []}
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["broker-run", "--request", str(request_path)])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 2
+    assert payload["status"] == "request_error"
+    assert payload["ok"] is False
+    assert payload["request_id"] == "job-err"

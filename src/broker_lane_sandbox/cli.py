@@ -85,11 +85,16 @@ def cmd_broker_run(args) -> int:
     from .broker_run import BrokerRunError, request_error, run_broker_request
     from .policy import PolicyError
 
+    request_id = None
     try:
         data = json.loads(Path(args.request).read_text(encoding="utf-8"))
+        # Echo the correlation id back unchanged even when the request later fails
+        # validation (the contract guarantees this). Only a string request_id is valid.
+        if isinstance(data, dict) and isinstance(data.get("request_id"), str):
+            request_id = data["request_id"]
         wrapper = run_broker_request(data)
     except (OSError, json.JSONDecodeError, BrokerRunError, PolicyError, TypeError) as exc:
-        wrapper = request_error(str(exc))
+        wrapper = request_error(str(exc), request_id)
         _emit(wrapper, args.pretty)
         return 2
 

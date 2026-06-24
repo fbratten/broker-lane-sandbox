@@ -65,14 +65,25 @@ For valid requests, stdout is one wrapper object:
     "duration_ms": 25,
     "truncated": false,
     "network": "offline",
-    "env_keys": ["HOME", "LANG", "PATH", "SANDBOX_NETWORK", "TZ"],
-    "limits": {}
+    "env_keys": ["HOME", "LANG", "NO_PROXY", "PATH", "SANDBOX_NETWORK", "TZ", "no_proxy"],
+    "limits": {
+      "resource_module": true,
+      "timeout_seconds": 5,
+      "cpu_seconds": null,
+      "address_space_bytes": null,
+      "max_processes": null,
+      "max_output_bytes": 1000000,
+      "enforced_rlimits": []
+    }
   }
 }
 ```
 
 `result` is the normal `ExecResult` schema. Denials, non-zero exits, timeouts, and spawn
-errors are still machine-readable results.
+errors are still machine-readable results. `env_keys` lists the names the child actually
+received (sorted, names only) — it is environment-dependent, but in `offline` mode always
+includes `SANDBOX_NETWORK`, `NO_PROXY`, and `no_proxy`. `limits` is always populated for a
+result that ran; it is `{}` only for `denied` / `spawn_error`, which never start a child.
 
 ## Request Errors
 
@@ -88,7 +99,10 @@ Malformed broker requests never spawn a child process. They emit JSON and exit `
 }
 ```
 
-`request_error` is a wrapper status, not an `ExecResult.status`.
+`request_error` is a wrapper status, not an `ExecResult.status`. `request_id` is echoed
+unchanged whenever the request provided one (a string) and the body parsed as JSON —
+including on this error path. It is `null` only when the request omitted `request_id`, or
+when the body could not be parsed as JSON at all (as in the example above).
 
 ## Exit Codes
 
