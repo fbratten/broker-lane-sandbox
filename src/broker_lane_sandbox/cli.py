@@ -88,7 +88,7 @@ def cmd_broker_run(args) -> int:
     try:
         data = json.loads(Path(args.request).read_text(encoding="utf-8"))
         wrapper = run_broker_request(data)
-    except (OSError, json.JSONDecodeError, BrokerRunError, PolicyError) as exc:
+    except (OSError, json.JSONDecodeError, BrokerRunError, PolicyError, TypeError) as exc:
         wrapper = request_error(str(exc))
         _emit(wrapper, args.pretty)
         return 2
