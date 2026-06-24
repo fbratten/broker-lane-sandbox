@@ -4,9 +4,10 @@ JSON in / JSON out. This is the *stable contract* broker-loom (or any caller) us
 reach the sandbox; it never imports the sandbox as a library. Subcommands:
 
   bls version
-  bls preflight --policy POLICY            # inspect posture, no execution
-  bls run       --policy POLICY -- ARGV... # default-deny sandboxed execution
-  bls models    [--catalog CATALOG]        # list model manifests (no weights)
+  bls preflight --policy POLICY              # inspect posture, no execution
+  bls run       --policy POLICY -- ARGV...   # default-deny sandboxed execution
+  bls broker-run --request REQUEST.json      # broker-loom JSON request seam
+  bls models    [--catalog CATALOG]          # list model manifests (no weights)
 
 Exit codes: 0 on a clean/OK outcome, non-zero on denial / timeout / error, so the
 caller can branch on the process status as well as parse the JSON body.
@@ -29,6 +30,16 @@ def _emit(obj: dict, pretty: bool) -> None:
 def _default_catalog() -> Path:
     # repo root: src/broker_lane_sandbox/cli.py -> up 3
     return Path(__file__).resolve().parents[2] / "models.example.yaml"
+
+
+def _exit_for_result_status(status: str) -> int:
+    if status == Status.OK:
+        return 0
+    if status in NON_RUN_STATUSES:
+        return 2          # refused / could not start
+    if status == Status.TIMEOUT:
+        return 124        # conventional timeout code
+    return 1              # ran but exited non-zero
 
 
 def cmd_version(args) -> int:
@@ -67,14 +78,28 @@ def cmd_run(args) -> int:
 
     result = SafeExecutor(policy).run(args.argv)
     _emit(result.to_dict(), args.pretty)
+    return _exit_for_result_status(result.status)
 
-    if result.status == Status.OK:
-        return 0
-    if result.status in NON_RUN_STATUSES:
-        return 2          # refused / could not start
-    if result.status == Status.TIMEOUT:
-        return 124        # conventional timeout code
-    return 1              # ran but exited non-zero
+
+def cmd_broker_run(args) -> int:
+    from .broker_run import BrokerRunError, request_error, run_broker_request
+    from .policy import PolicyError
+
+    request_id = None
+    try:
+        data = json.loads(Path(args.request).read_text(encoding="utf-8"))
+        # Echo the correlation id back unchanged even when the request later fails
+        # validation (the contract guarantees this). Only a string request_id is valid.
+        if isinstance(data, dict) and isinstance(data.get("request_id"), str):
+            request_id = data["request_id"]
+        wrapper = run_broker_request(data)
+    except (OSError, json.JSONDecodeError, BrokerRunError, PolicyError, TypeError) as exc:
+        wrapper = request_error(str(exc), request_id)
+        _emit(wrapper, args.pretty)
+        return 2
+
+    _emit(wrapper, args.pretty)
+    return _exit_for_result_status(wrapper["result"]["status"])
 
 
 def cmd_models(args) -> int:
@@ -103,6 +128,9 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("argv", nargs=argparse.REMAINDER,
                     help="command to run (after `--`)")
 
+    br = sub.add_parser("broker-run", help="run a broker-loom JSON request")
+    br.add_argument("--request", required=True, help="path to a broker-run request .json")
+
     md = sub.add_parser("models", help="list model manifests (no weights)")
     md.add_argument("--catalog", default=None,
                     help="catalog path (default: models.example.yaml)")
@@ -120,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
         "version": cmd_version,
         "preflight": cmd_preflight,
         "run": cmd_run,
+        "broker-run": cmd_broker_run,
         "models": cmd_models,
     }
     return handlers[args.command](args)

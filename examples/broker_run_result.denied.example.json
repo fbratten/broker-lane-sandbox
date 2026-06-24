@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "request_id": "broker-job-denied",
+  "result": {
+    "status": "denied",
+    "argv": ["/usr/bin/python3", "-c", "print('must not run')"],
+    "reason": "argv[0] must be a bare command name with no path component: '/usr/bin/python3'",
+    "exit_code": null,
+    "stdout": "",
+    "stderr": "",
+    "duration_ms": 0,
+    "truncated": false,
+    "network": "offline",
+    "env_keys": [],
+    "limits": {},
+    "ok": false
+  }
+}
