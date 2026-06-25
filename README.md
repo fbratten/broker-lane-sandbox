@@ -5,8 +5,10 @@ boundary.** A small, dependency-free, default-deny sandbox that wraps the act of
 *running something* — a subprocess today, a local model or agent lane tomorrow — and
 returns a machine-readable JSON result. A **separate project** from `project-broker-loom`.
 
-> Status: **P1 (safe-exec core) complete and adversarially reviewed.** Personal-use
-> MVP — fail-loud, no enterprise/kernel hardening, no backward-compatibility promises.
+> Status: **P2 (broker-loom ↔ sandbox CLI/JSON seam) complete — merged in #3 (`2a80000`).**
+> The sandbox-side seam is delivered; broker-loom-side consumption is the next slice. P1
+> safe-exec core remains adversarially reviewed. Personal-use MVP — fail-loud, no
+> enterprise/kernel hardening, no backward-compatibility promises.
 
 ---
 
@@ -181,7 +183,7 @@ result schema, exit-code table, and worked examples.
 |------|-------|-------|
 | **P0** | repo invariants — model-artifact guard, `.gitignore`, manifests, policy docs | ✅ done |
 | **P1** | safe-exec core — default-deny policy, env scrub, network policy, rlimits, `ExecResult`, preflight, `bls` CLI | ✅ done + adversarially reviewed |
-| **P2** | broker-loom ↔ sandbox CLI/JSON seam | ⏳ planned |
+| **P2** | broker-loom ↔ sandbox CLI/JSON seam | ✅ done (merged in #3) |
 | **P3** | local/quantized model runners (env-driven cache) | ⏳ planned |
 | **P4** | streaming | ⏳ planned |
 
