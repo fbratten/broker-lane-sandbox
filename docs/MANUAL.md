@@ -239,8 +239,8 @@ works with the stdlib via `--catalog`. Local weights live under `${SANDBOX_MODEL
 |------|-------|-------|
 | P0 | repo invariants (model-artifact guard, manifests, policy docs) | ✅ |
 | P1 | safe-exec core (policy, env scrub, network, limits, `ExecResult`, `bls`) | ✅ reviewed |
-| P2 | broker-loom ↔ sandbox CLI/JSON seam | ⏳ |
+| P2 | broker-loom ↔ sandbox CLI/JSON seam | ✅ merged (#3) |
 | P3 | local/quantized model runners (env-driven cache) | ⏳ |
 | P4 | streaming | ⏳ |
 
-Future P2/P3/P4 work lands via feature branches + PRs against `main`.
+Future P3/P4 work lands via feature branches + PRs against `main`.
