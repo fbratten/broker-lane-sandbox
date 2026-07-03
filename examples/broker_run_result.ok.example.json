@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "request_id": "broker-job-001",
+  "result": {
+    "status": "ok",
+    "argv": ["python3", "-c", "print('hello from broker-run')"],
+    "reason": "completed",
+    "exit_code": 0,
+    "stdout": "hello from broker-run\n",
+    "stderr": "",
+    "duration_ms": 25,
+    "truncated": false,
+    "network": "offline",
+    "env_keys": ["HOME", "LANG", "NO_PROXY", "PATH", "SANDBOX_NETWORK", "TZ", "no_proxy"],
+    "limits": {
+      "resource_module": true,
+      "timeout_seconds": 5,
+      "cpu_seconds": 5,
+      "address_space_bytes": 1073741824,
+      "max_processes": 32,
+      "max_output_bytes": 1000000,
+      "enforced_rlimits": [
+        {"resource": 0, "value": 5},
+        {"resource": 9, "value": 1073741824},
+        {"resource": 6, "value": 32}
+      ]
+    },
+    "ok": true
+  }
+}
