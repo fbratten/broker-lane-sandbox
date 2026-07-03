@@ -38,6 +38,8 @@ def rlimit_spec(policy) -> list[tuple[int, int]]:
         spec.append((resource.RLIMIT_AS, int(policy.address_space_bytes)))
     if policy.max_processes is not None:
         spec.append((resource.RLIMIT_NPROC, int(policy.max_processes)))
+    if policy.max_file_size_bytes is not None:
+        spec.append((resource.RLIMIT_FSIZE, int(policy.max_file_size_bytes)))
     return spec
 
 
@@ -49,6 +51,7 @@ def limits_summary(policy) -> dict:
         "cpu_seconds": policy.cpu_seconds,
         "address_space_bytes": policy.address_space_bytes,
         "max_processes": policy.max_processes,
+        "max_file_size_bytes": policy.max_file_size_bytes,
         "max_output_bytes": policy.max_output_bytes,
         "enforced_rlimits": [
             {"resource": r, "value": v} for r, v in rlimit_spec(policy)

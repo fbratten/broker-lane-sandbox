@@ -13,6 +13,7 @@ Canonical on-disk format is JSON (stdlib, zero deps). YAML is read opportunistic
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from dataclasses import dataclass, field, fields
@@ -37,6 +38,31 @@ SECRET_NAME_RE = re.compile(
 )
 
 _VALID_NETWORK = ("offline", "online")
+
+
+def _positive_int(name: str, val) -> int | None:
+    """Validate an integer policy field: int (or integral float) > 0, or None.
+
+    A malformed policy must surface as PolicyError -- never a raw TypeError and
+    never a silently-coerced limit. In particular JSON ``true`` must not become
+    limit=1 (bool is an int subclass), and ``"10"`` must not crash with a raw
+    TypeError. Integral floats are accepted and normalized to int because JSON
+    numbers like ``1e9`` arrive as float; fractional floats are rejected rather
+    than silently truncated.
+    """
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        raise PolicyError(f"{name} must be an integer, got boolean {val!r}")
+    if isinstance(val, int):
+        out = val
+    elif isinstance(val, float) and val.is_integer():
+        out = int(val)
+    else:
+        raise PolicyError(f"{name} must be a positive integer, got {val!r}")
+    if out <= 0:
+        raise PolicyError(f"{name} must be > 0 when set, got {out}")
+    return out
 
 
 def is_bare_command(command: str) -> bool:
@@ -78,6 +104,7 @@ class SandboxPolicy:
     cpu_seconds: int | None = None             # RLIMIT_CPU (POSIX)
     address_space_bytes: int | None = None     # RLIMIT_AS (POSIX)
     max_processes: int | None = None           # RLIMIT_NPROC (POSIX)
+    max_file_size_bytes: int | None = None     # RLIMIT_FSIZE (POSIX), per-file write cap
 
     # --- working directory / model cache ------------------------------------
     working_dir: str | None = None
@@ -94,17 +121,30 @@ class SandboxPolicy:
             raise PolicyError(
                 f"network must be one of {_VALID_NETWORK}, got {self.network!r}"
             )
-        if self.timeout_seconds <= 0:
-            raise PolicyError("timeout_seconds must be > 0")
-        if self.max_output_bytes <= 0:
-            raise PolicyError("max_output_bytes must be > 0")
-        for name, val in (
-            ("cpu_seconds", self.cpu_seconds),
-            ("address_space_bytes", self.address_space_bytes),
-            ("max_processes", self.max_processes),
+        # Numeric fields are type-hardened: malformed values (bool/str/fractional
+        # float) raise PolicyError -- never a raw TypeError, never silent coercion.
+        if isinstance(self.timeout_seconds, bool) or not isinstance(
+            self.timeout_seconds, (int, float)
         ):
-            if val is not None and val <= 0:
-                raise PolicyError(f"{name} must be > 0 when set, got {val}")
+            raise PolicyError(
+                f"timeout_seconds must be a number, got {self.timeout_seconds!r}"
+            )
+        if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
+            raise PolicyError(
+                f"timeout_seconds must be a finite number > 0, got {self.timeout_seconds!r}"
+            )
+        out = _positive_int("max_output_bytes", self.max_output_bytes)
+        if out is None:
+            raise PolicyError("max_output_bytes must be a positive integer, got None")
+        self.max_output_bytes = out
+        self.cpu_seconds = _positive_int("cpu_seconds", self.cpu_seconds)
+        self.address_space_bytes = _positive_int(
+            "address_space_bytes", self.address_space_bytes
+        )
+        self.max_processes = _positive_int("max_processes", self.max_processes)
+        self.max_file_size_bytes = _positive_int(
+            "max_file_size_bytes", self.max_file_size_bytes
+        )
         if not isinstance(self.allowed_commands, list):
             raise PolicyError("allowed_commands must be a list")
 

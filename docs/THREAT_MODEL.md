@@ -98,16 +98,21 @@ lane** that, once running, tries to:
   isolation would require OS-level sandboxing (namespaces / seccomp), which is out of scope.
 
 ### 4.4 Subprocess / process-tree
-- **Risk:** runaway CPU/memory, fork bombs, children that outlive the timeout, or a descendant
-  that escapes the process group and holds the output pipe open.
+- **Risk:** runaway CPU/memory, fork bombs, runaway file writes, children that outlive the
+  timeout, or a descendant that escapes the process group and holds the output pipe open.
 - **Mitigations:** the child starts a **new session** (`setsid`); **RLIMIT_CPU / RLIMIT_AS /
-  RLIMIT_NPROC** are applied (POSIX); a **wall-clock timeout** kills the whole **process group**
+  RLIMIT_NPROC / RLIMIT_FSIZE** are applied (POSIX, opt-in per policy field); a **wall-clock
+  timeout** kills the whole **process group**
   (`killpg` + `SIGKILL`); the post-kill drain is **time-boxed** so an escaped descendant cannot
   pin `run()` open past the budget; output is truncated to a cap. Pre-spawn failures (missing
   exe, bad cwd, an rlimit above the host ceiling) return a `spawn_error` **result**, not a crash.
+  Malformed limit values (booleans, strings, fractional floats) are rejected as `PolicyError`
+  — never silently coerced (JSON `true` is not "limit = 1").
 - **Limitations:** a child that **double-forks and `setsid`s** to escape the group survives the
   group kill (best-effort, documented); `RLIMIT_NPROC` is **per-UID** (a POSIX property), not
-  per-job; `max_output_bytes` counts **characters**, not bytes; on non-POSIX hosts rlimits are
+  per-job; `max_output_bytes` counts **characters**, not bytes; `max_file_size_bytes` caps each
+  **individual file** (SIGXFSZ), it is **not a disk quota** — many files each below the cap can
+  still consume disk; on non-POSIX hosts rlimits are
   unavailable and only the wall-clock timeout applies.
 
 ### 4.5 Command execution / default-deny
@@ -138,7 +143,7 @@ lane** that, once running, tries to:
 - **No binary-identity pinning** — invocation names are gated and resolved on `PATH`.
 - **Heuristic secret filter** — exact-name allow-listing of a secret (or `allow_secret_env`)
   still passes it.
-- **`max_output_bytes` is a character cap; `RLIMIT_NPROC` is per-UID.**
+- **`max_output_bytes` is a character cap; `RLIMIT_NPROC` is per-UID; `max_file_size_bytes` is a per-file cap (SIGXFSZ), not a disk quota.**
 - **Single-operator MVP** — no multi-tenancy, no audit log signing, no formal verification.
 
 These limitations are intentional for the current scope (P1). Hardening toward OS-level

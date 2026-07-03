@@ -72,6 +72,7 @@ For valid requests, stdout is one wrapper object:
       "cpu_seconds": null,
       "address_space_bytes": null,
       "max_processes": null,
+      "max_file_size_bytes": null,
       "max_output_bytes": 1000000,
       "enforced_rlimits": []
     }

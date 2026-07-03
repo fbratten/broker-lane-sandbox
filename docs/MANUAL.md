@@ -75,12 +75,17 @@ A policy is a JSON object. Defaults are **default-deny**; you must opt in.
 | `cpu_seconds` | int? | `null` | RLIMIT_CPU (POSIX), if set (> 0) |
 | `address_space_bytes` | int? | `null` | RLIMIT_AS (POSIX), if set (> 0) |
 | `max_processes` | int? | `null` | RLIMIT_NPROC (POSIX), if set (> 0) |
+| `max_file_size_bytes` | int? | `null` | RLIMIT_FSIZE (POSIX): per-**file** write cap, if set (> 0) |
 | `working_dir` | string? | `null` | child cwd; must exist if set |
 | `model_dir_env` | string | `"SANDBOX_MODEL_DIR"` | env var naming the runtime model-cache root |
 
 **Validation (fail-loud):** bad `schema_version`, an invalid `network`, non-positive
 `timeout_seconds` / `max_output_bytes` / limits, a non-list `allowed_commands`, or any
-unknown key raises a `PolicyError`. See [`policy.example.json`](../policy.example.json).
+unknown key raises a `PolicyError`. Numeric limit fields are **strictly typed**: booleans
+(JSON `true` is not "limit = 1"), strings, and fractional floats raise `PolicyError`;
+integral floats (e.g. JSON `1e9`) are accepted and normalized to int (`timeout_seconds` is a plain number and MAY be fractional, e.g. `0.5`).
+`max_file_size_bytes` is new in this revision: an **older** sandbox rejects a policy that sets it, fail-loud, as `unknown policy keys` (the safe direction) -- upgrade the sandbox before emitting the field.
+See [`policy.example.json`](../policy.example.json).
 
 Notes:
 - **Bare command names only.** `allowed_commands: ["python3"]` permits `python3`
@@ -138,8 +143,8 @@ a bounded-resource executor — sized for a **single-operator personal tool**.
 - Default-deny execution; bare-name allow-list (no path bypass).
 - Empty-baseline env with a secret-name drop; `env_keys` never exposes values.
 - Offline-by-default proxy stripping + an offline signal to cooperating runners.
-- POSIX rlimits (CPU / AS / NPROC) + a wall-clock timeout that group-kills the child;
-  the post-kill drain is time-boxed so an escaped descendant can't pin the call open.
+- POSIX rlimits (CPU / AS / NPROC / FSIZE) + a wall-clock timeout that group-kills the
+  child; the post-kill drain is time-boxed so an escaped descendant can't pin the call open.
 - Pre-spawn failures (missing exe, bad cwd, rlimit above the host ceiling) become
   `spawn_error` **results**, not crashes.
 
@@ -151,7 +156,9 @@ a bounded-resource executor — sized for a **single-operator personal tool**.
   resolved on `PATH`. A writable earlier-`PATH` entry is a host-integrity concern outside
   the boundary.
 - `max_output_bytes` counts characters, not bytes; `RLIMIT_NPROC` is per-UID (a POSIX
-  property), not per-job.
+  property), not per-job; `max_file_size_bytes` caps each **individual file** a child
+  writes (SIGXFSZ past the cap) — it is **not** a disk quota, so a child may still write
+  many files each below the cap.
 
 These boundaries were confirmed by an adversarial review: the path-bypass, timeout-defeat,
 rlimit-crash, and guard-fail-open defects were real and fixed; the kernel/identity-pinning
@@ -173,7 +180,8 @@ A minimal policy (`policy.json`):
   "timeout_seconds": 30,
   "cpu_seconds": 10,
   "address_space_bytes": 1073741824,
-  "max_processes": 64
+  "max_processes": 64,
+  "max_file_size_bytes": 104857600
 }
 ```
 
@@ -226,7 +234,7 @@ works with the stdlib via `--catalog`. Local weights live under `${SANDBOX_MODEL
 - **`denied: command 'x' not in allowed_commands`** — add the bare name to
   `allowed_commands`.
 - **`spawn_error: could not start process: Exception occurred in preexec_fn.`** — a
-  requested rlimit (`max_processes` / `cpu_seconds` / `address_space_bytes`) exceeds the
+  requested rlimit (`max_processes` / `cpu_seconds` / `address_space_bytes` / `max_file_size_bytes`) exceeds the
   host's hard ceiling. Lower it (check `ulimit -a`).
 - **`bls models` errors about PyYAML** — install `pip install pyyaml`, or pass a `.json`
   catalog via `--catalog`.

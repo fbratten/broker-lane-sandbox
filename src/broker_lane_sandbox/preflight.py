@@ -40,7 +40,7 @@ def preflight(policy: SandboxPolicy) -> dict:
     if not have_resource():
         warnings.append("resource module unavailable: rlimits not enforced (timeout only)")
     elif not rlimit_spec(policy):
-        warnings.append("no rlimits configured (cpu/address-space/processes are unbounded)")
+        warnings.append("no rlimits configured (cpu/address-space/processes/file-size are unbounded)")
 
     # --- model cache --------------------------------------------------------
     model_root = os.environ.get(policy.model_dir_env)
