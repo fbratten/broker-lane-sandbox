@@ -17,6 +17,7 @@
   "cpu_seconds": 10,
   "address_space_bytes": 1073741824,
   "max_processes": 64,
+  "max_file_size_bytes": 104857600,
 
   "working_dir": null,
   "model_dir_env": "SANDBOX_MODEL_DIR"

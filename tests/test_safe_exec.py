@@ -69,6 +69,65 @@ def test_policy_rejects_nonpositive_limits():
         SandboxPolicy(timeout_seconds=0)
     with pytest.raises(PolicyError):
         SandboxPolicy(cpu_seconds=0)
+    with pytest.raises(PolicyError):
+        SandboxPolicy(max_file_size_bytes=0)
+    with pytest.raises(PolicyError):
+        SandboxPolicy(max_file_size_bytes=-1)
+
+
+# --- limit-field type hardening: PolicyError, never TypeError / silent coercion --
+
+@pytest.mark.parametrize(
+    "fld", ["cpu_seconds", "address_space_bytes", "max_processes",
+            "max_file_size_bytes", "max_output_bytes"]
+)
+def test_policy_rejects_boolean_limits(fld):
+    # JSON `true` must be an ERROR, not a silently-coerced RLIMIT of 1
+    # (bool is an int subclass in Python).
+    with pytest.raises(PolicyError):
+        SandboxPolicy(**{fld: True})
+
+
+@pytest.mark.parametrize(
+    "fld", ["cpu_seconds", "address_space_bytes", "max_processes",
+            "max_file_size_bytes", "max_output_bytes"]
+)
+def test_policy_rejects_string_and_fractional_limits(fld):
+    with pytest.raises(PolicyError):          # was a raw TypeError before hardening
+        SandboxPolicy(**{fld: "10"})
+    with pytest.raises(PolicyError):          # was silently truncated before hardening
+        SandboxPolicy(**{fld: 1.5})
+
+
+def test_policy_rejects_non_numeric_timeout():
+    with pytest.raises(PolicyError):
+        SandboxPolicy(timeout_seconds="30")
+    with pytest.raises(PolicyError):
+        SandboxPolicy(timeout_seconds=True)
+
+
+def test_policy_rejects_non_finite_timeout():
+    # NaN passes `<= 0` comparisons and inf would let run() block forever --
+    # both are malformed and must raise PolicyError.
+    import math
+    with pytest.raises(PolicyError):
+        SandboxPolicy(timeout_seconds=math.nan)
+    with pytest.raises(PolicyError):
+        SandboxPolicy(timeout_seconds=math.inf)
+    assert SandboxPolicy(timeout_seconds=0.5).timeout_seconds == 0.5   # fractional is fine
+
+
+def test_policy_accepts_integral_float_limits():
+    # JSON scientific notation (1e9) arrives as float; integral floats normalize
+    # to int so rlimits are exact. Fractional floats are rejected (test above).
+    # All five fields route through the same helper -- cover each.
+    p = SandboxPolicy(address_space_bytes=1e9, cpu_seconds=10.0, max_file_size_bytes=2.0**20,
+                      max_processes=64.0, max_output_bytes=1e6)
+    assert p.address_space_bytes == 10**9 and isinstance(p.address_space_bytes, int)
+    assert p.cpu_seconds == 10 and isinstance(p.cpu_seconds, int)
+    assert p.max_file_size_bytes == 2**20 and isinstance(p.max_file_size_bytes, int)
+    assert p.max_processes == 64 and isinstance(p.max_processes, int)
+    assert p.max_output_bytes == 10**6 and isinstance(p.max_output_bytes, int)
 
 
 # --- F1 regression: only BARE command names may pass the gate ----------------
@@ -141,13 +200,39 @@ def test_env_scrub_offline_strips_proxies(monkeypatch):
 # --- limits: pure spec builder ----------------------------------------------
 
 def test_rlimit_spec_pure():
-    p = _exec_policy(cpu_seconds=5, address_space_bytes=2**30, max_processes=32)
+    p = _exec_policy(cpu_seconds=5, address_space_bytes=2**30, max_processes=32,
+                     max_file_size_bytes=2**20)
     spec = rlimit_spec(p)
     if have_resource():
-        assert len(spec) == 3
+        assert len(spec) == 4
         assert all(isinstance(v, int) and v > 0 for _, v in spec)
     else:                                   # pragma: no cover - Windows
         assert spec == []
+
+
+def test_rlimit_spec_empty_when_no_limits_requested():
+    # Limits are applied ONLY when explicitly requested: the default policy
+    # (all limit fields None) must produce an empty rlimit spec.
+    assert rlimit_spec(SandboxPolicy()) == []
+
+
+def test_rlimit_spec_includes_file_size_only_when_set():
+    p = SandboxPolicy(max_file_size_bytes=1_000_000)
+    spec = rlimit_spec(p)
+    if have_resource():
+        import resource
+        assert (resource.RLIMIT_FSIZE, 1_000_000) in spec
+        assert len(spec) == 1                # nothing else was requested
+    else:                                   # pragma: no cover - Windows
+        assert spec == []
+
+
+def test_limits_summary_reports_file_size():
+    from broker_lane_sandbox.limits import limits_summary
+    s = limits_summary(SandboxPolicy(max_file_size_bytes=12345))
+    assert s["max_file_size_bytes"] == 12345
+    s_default = limits_summary(SandboxPolicy())
+    assert s_default["max_file_size_bytes"] is None
 
 
 # --- executor: default-deny + allow-list + run/exit/timeout/truncate ---------
@@ -224,6 +309,30 @@ def test_executor_cpu_limit_terminates_busy_loop():
     r = SafeExecutor(p).run([PYBIN, "-c", "\nwhile True:\n  pass\n"])
     assert r.exit_code != 0                      # signal-killed or timed out
     assert r.duration_ms < 8000
+
+
+@requires_python
+@pytest.mark.skipif(not have_resource(), reason="POSIX rlimits required")
+def test_executor_file_size_limit_blocks_big_write(tmp_path):
+    # RLIMIT_FSIZE=64KiB: a 1MiB write must fail (SIGXFSZ or an IOError in the
+    # child), never complete. The on-disk file, if any, stays within the cap.
+    p = _exec_policy(max_file_size_bytes=64 * 1024, working_dir=str(tmp_path))
+    prog = "open('big.bin','wb').write(b'x'*(1024*1024)); print('WROTE-ALL')"
+    r = SafeExecutor(p).run([PYBIN, "-c", prog])
+    assert r.exit_code != 0 and "WROTE-ALL" not in r.stdout
+    big = tmp_path / "big.bin"
+    assert (not big.exists()) or big.stat().st_size <= 64 * 1024
+
+
+@requires_python
+@pytest.mark.skipif(not have_resource(), reason="POSIX rlimits required")
+def test_executor_file_size_limit_allows_small_write(tmp_path):
+    # The same limit must NOT interfere with a write below the cap.
+    p = _exec_policy(max_file_size_bytes=64 * 1024, working_dir=str(tmp_path))
+    prog = "open('small.bin','wb').write(b'x'*1024); print('OK-SMALL')"
+    r = SafeExecutor(p).run([PYBIN, "-c", prog])
+    assert r.ok and "OK-SMALL" in r.stdout
+    assert (tmp_path / "small.bin").stat().st_size == 1024
 
 
 # --- F2 regression: an escaped descendant cannot pin run() past the timeout ---

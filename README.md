@@ -56,8 +56,8 @@ built).
   secret-looking variables even if allow-listed.
 - Treats the network as **offline** by default (strips proxy variables; signals
   cooperating runners to stay offline).
-- Bounds the child with POSIX rlimits (CPU / address-space / processes) and a
-  wall-clock timeout that kills the whole process group.
+- Bounds the child with opt-in POSIX rlimits (CPU / address-space / processes /
+  per-file write size) and a wall-clock timeout that kills the whole process group.
 - Returns a JSON `ExecResult` for every outcome — including denials and spawn errors.
 - Keeps model **weights out of git** and resolves them from an env-driven runtime cache.
 
