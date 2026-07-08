@@ -594,6 +594,15 @@ def test_cli_models_json_catalog(tmp_path, capsys):
     assert out["profiles"]["demo"]["runner"] == "llama.cpp"
 
 
+def test_cli_models_missing_catalog_is_clean_json_error(tmp_path, capsys):
+    # On an installed copy the default catalog path does not exist; the CLI must
+    # return clean JSON + exit 2, never a FileNotFoundError traceback.
+    rc = cli.main(["models", "--catalog", str(tmp_path / "nope.json")])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 2 and out["ok"] is False
+    assert "catalog not found" in out["error"]
+
+
 def test_catalog_malformed_profile_fails_loud(tmp_path):
     # A profile whose value is not a mapping must raise PolicyError with a clear
     # message, not an opaque AttributeError from prof.get(...).

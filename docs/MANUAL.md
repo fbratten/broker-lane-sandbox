@@ -104,7 +104,7 @@ JSON in / JSON out. Global flag: `--pretty`.
 | `bls version` | print name / version / schema_version | `0` |
 | `bls preflight --policy P` | inspect posture; **never executes** | `0` ok, `1` warnings |
 | `bls run --policy P [--timeout S] [--cwd D] -- ARGV…` | default-deny sandboxed run | `0` ok · `1` ran-but-nonzero · `2` denied/spawn-error · `124` timeout |
-| `bls models [--catalog C]` | list model manifests (no weights) | `0` |
+| `bls models [--catalog C]` | list model manifests (no weights) | `0` ok · `2` catalog not found (pass `--catalog` on installed copies; the default path resolves only from a source checkout) |
 | `bls broker-run --request R` | P2 broker seam: JSON request in, JSON wrapper out | `0` ok · `1` ran-but-nonzero · `2` denied/spawn-error/request-error · `124` timeout |
 
 `--timeout` / `--cwd` on `run` override the policy's `timeout_seconds` / `working_dir`

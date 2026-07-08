@@ -105,7 +105,18 @@ def cmd_broker_run(args) -> int:
 def cmd_models(args) -> int:
     from .catalog import list_profiles
 
-    catalog = args.catalog or _default_catalog()
+    catalog = Path(args.catalog) if args.catalog else _default_catalog()
+    if not catalog.is_file():
+        # The default resolves relative to a SOURCE CHECKOUT; an installed copy
+        # has no repo root above it. Fail with clean JSON, not a traceback.
+        _emit(
+            {"ok": False,
+             "error": f"catalog not found: {catalog}. Pass --catalog PATH "
+                      "(the default models.example.yaml only resolves from a "
+                      "source checkout)."},
+            args.pretty,
+        )
+        return 2
     summary = list_profiles(catalog)
     _emit(summary, args.pretty)
     return 0

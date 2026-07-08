@@ -27,10 +27,13 @@ FORBIDDEN_EXT = {
     ".onnx", ".mlmodel", ".ckpt", ".tflite",
 }
 
-# Directory prefixes that are runtime cache only -- nothing under them is tracked.
-FORBIDDEN_DIR_PREFIXES = (
-    "models/", "model-cache/", "runtime/", ".cache/",
-    ".huggingface/", "hf-cache/", "ollama/", "llama.cpp/",
+# Directory names that are runtime cache only -- nothing under them is tracked.
+# Matched as a path SEGMENT at any depth (e.g. tests/models/x.dat), mirroring the
+# unanchored .gitignore patterns; a root-only prefix match would let a nested
+# cache dir slip past the guard.
+FORBIDDEN_DIR_NAMES = (
+    "models", "model-cache", "runtime", ".cache",
+    ".huggingface", "hf-cache", "ollama", "llama.cpp",
 )
 
 VIOLATION_EXIT = 5
@@ -82,7 +85,7 @@ def _violations(repo: str, paths: list[str], max_bytes: int) -> list[str]:
         if ext in FORBIDDEN_EXT:
             found.append(f"{rel}  [forbidden model-weight extension '{ext}']")
             continue
-        if any(low.startswith(p) for p in FORBIDDEN_DIR_PREFIXES):
+        if any(seg in FORBIDDEN_DIR_NAMES for seg in low.split("/")[:-1]):
             found.append(f"{rel}  [under a runtime model-cache directory]")
             continue
         abs = os.path.join(repo, rel)
