@@ -74,3 +74,63 @@ test-contract gaps, packaging/CI readiness), adversarial verify, then fix loop.
 correctness defects (F08-F10) with regression tests; iteration 5: test-gap
 batch (F11-F21); iteration 6: packaging/CI (F22-F27); iteration 7: final
 verification + handover + push.
+
+---
+
+## Iteration 3 — 2026-07-08 — Doc-drift batch (F01-F07)
+
+**Changed (commit `3f5a3c3`):** README no longer calls broker-loom integration
+"not yet built" (two stale pre-P2 passages rewritten); `bls broker-run` added to
+the README CLI section and the MANUAL command/exit-code table (incl.
+request_error -> exit 2); MANUAL intro widened from P1-only to P1+P2; seam doc's
+request_id-null cases corrected (non-string id, unreadable file); result fixture
+gains `max_file_size_bytes`; starter-policy description and layout list updated.
+
+**Verification:** 70/70 tests, guard green, fixture parses as JSON.
+
+## Iteration 4 — 2026-07-08 — Correctness defects (F08-F10)
+
+**Changed (commit `514c0b9`):**
+- executor: `errors="replace"` on child output decode — a permitted command
+  emitting non-UTF-8 bytes now returns an ExecResult instead of escaping
+  `run()` with UnicodeDecodeError. Limitation documented in MANUAL.
+- policy: `env_allowlist` / `env_passthrough_prefixes` validated as lists of
+  strings; empty/whitespace prefixes rejected (an empty prefix matched EVERY
+  env name and passed the entire environment through). envscrub ignores falsy
+  prefixes as defense in depth.
+- catalog: non-mapping profiles container / profile entry raises PolicyError
+  instead of crashing `bls models` with AttributeError.
+
+**Verification:** regression tests for all three; suite 70 -> 74, all pass.
+
+## Iteration 5 — 2026-07-08 — Contract-test gaps (F11-F21)
+
+**Changed (commit `a23e2bd`):** 18 new tests pinning documented-but-untested
+contract behaviors: broker-run stdin delivery + type rejection; request-level
+timeout_seconds/working_dir overrides; exit codes 1 and 124 at both `run` and
+`broker-run` CLI boundaries; request schema_version enforcement (wrong +
+missing); network=online env contract; env_passthrough_prefixes pass +
+secret-drop; empty-argv gate (executor + CLI); missing-executable spawn_error;
+unparseable/missing request file -> request_error with request_id null;
+`run --timeout/--cwd` overrides; preflight exit-1 pinning.
+
+**Verification:** suite 74 -> 92, all pass.
+
+## Iteration 6 — 2026-07-08 — Packaging / CI / guard (F22-F27)
+
+**Changed (commit `53937d9`):**
+- `.githooks/pre-commit` tracked mode 100644 -> 100755 (git silently ignores
+  non-executable hooks; the documented enablement was a no-op on fresh
+  clones). New invariant test pins the tracked mode.
+- pyproject: `[build-system]` table added (setuptools>=61).
+- CI: python matrix 3.10-3.13 (was 3.12 only) + install smoke step
+  (`pip install '.[yaml]'`, then bls version/preflight/run/models).
+- cli: `bls models` with a missing catalog returns clean JSON + exit 2
+  instead of a FileNotFoundError traceback (installed copies have no repo
+  root above them). MANUAL exit-code row updated.
+- artifact guard: forbidden cache dirs matched as path segments at any depth
+  (mirrors .gitignore), closing the `git add -f tests/models/w.dat` bypass.
+
+**Verification:** suite 92 -> 95, all pass; guard --tracked clean;
+installed-copy smoke verified in a fresh venv (version/preflight/run/models
+all behave; default-catalog case returns the new clean error).
