@@ -40,7 +40,7 @@ Enable the model-artifact guard and run the tests:
 
 ```bash
 git config core.hooksPath .githooks
-python3 -m pytest tests/ -q          # 42 tests
+python3 -m pytest tests/ -q          # 70 tests
 ```
 
 ## 2. Concepts
