@@ -134,3 +134,53 @@ unparseable/missing request file -> request_error with request_id null;
 **Verification:** suite 92 -> 95, all pass; guard --tracked clean;
 installed-copy smoke verified in a fresh venv (version/preflight/run/models
 all behave; default-catalog case returns the new clean error).
+
+---
+
+## Iteration 7 — 2026-07-08 — Independent verification workflow
+
+**Ran:** second workflow `bls-finalization-verify` (run wf_be5234d5-185),
+3 agents: per-finding resolution check (F01-F27 against the working tree, not
+the commit messages), adversarial review of the full finalization diff, and a
+fresh doc-consistency sweep after the fixes.
+
+**Found:** all 27 findings confirmed RESOLVED. Five residual issues:
+1. (medium) non-UTF-8 request FILE crashed `bls broker-run` with an uncaught
+   UnicodeDecodeError traceback (exit 1) — the request-side analog of the F08
+   executor fix; the except tuple missed UnicodeDecodeError.
+2. (low) MANUAL's new "decoded as UTF-8" claim was an overclaim: without
+   encoding="utf-8", text mode uses the locale encoding (cp1252 on Windows).
+3. (low) the new is_file() gate in `bls models` broke process-substitution /
+   fifo catalog paths that previously worked (regression introduced in it. 6).
+4. (low) seam doc labeled its request_error example as the unparseable-JSON
+   case; it actually illustrates an omitted request_id.
+5. (low) build/ (left by the pip-install smoke) was not gitignored.
+
+**Changed:** nothing yet in this iteration (findings carried into it. 8);
+the mid-loop count sync + lane log landed as `f8101f3`.
+
+## Iteration 8 — 2026-07-08 — Residual fixes + closure verification
+
+**Changed (commits `3665a89`, closure commit):**
+- cli(broker-run): UnicodeDecodeError added to the request-error except tuple;
+  non-UTF-8 request file now returns request_error + exit 2. Test added.
+- executor: encoding="utf-8" alongside errors="replace" — deterministic
+  decode on every platform; MANUAL claim now true everywhere.
+- cli(models): is_file() pre-check replaced with catching the read OSError —
+  process substitution works again; missing catalog still clean JSON exit 2.
+- seam doc example labeling corrected; .gitignore: build/, dist/ added.
+- README/MANUAL test counts synced to the final 96.
+
+**Verification (final):** 96/96 tests pass; guard --tracked exit 0;
+`broker-run` non-UTF-8 repro returns request_error exit 2; process-
+substitution catalog repro returns the profile summary exit 0.
+
+---
+
+## CLOSURE — 2026-07-08
+
+Finalization loop complete after 8 iterations, 2 orchestration workflows
+(35 agents total), 27+5 verified findings fixed, suite grown 70 -> 96.
+Full summary: HANDOVER.md in this folder. Out-of-scope items left for the
+operator: P3/P4 phases, repo visibility, BACKLOG-137 (operator-machine
+branch), broker-loom-side seam consumption (proof slice exists there).

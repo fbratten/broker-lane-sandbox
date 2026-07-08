@@ -199,13 +199,13 @@ P1 shipped with an adversarial review (4 lenses + per-finding skeptic verificati
 4 confirmed defects were fixed and re-verified (default-deny path bypass, timeout
 defeat, rlimit crash, guard fail-open). The suite has since grown with the P2 seam,
 the resource-limit contract hardening, and the 2026-07 finalization audit:
-**95 tests pass**, stdlib-only.
+**96 tests pass**, stdlib-only.
 
 ## Develop
 
 ```bash
 git config core.hooksPath .githooks                  # enable the model-artifact guard
-python3 -m pytest tests/ -q                           # full suite (95 tests)
+python3 -m pytest tests/ -q                           # full suite (96 tests)
 python3 scripts/check_model_artifacts.py --tracked    # audit the tracked tree
 ```
 
