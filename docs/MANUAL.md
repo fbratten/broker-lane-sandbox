@@ -1,9 +1,10 @@
 # broker-lane-sandbox — Manual
 
-A practical guide to the P1 safe-exec core: the policy schema, the result schema, the
-`bls` CLI, the security model, and worked examples. For the project overview see the
-[README](../README.md); for the model-weight rules see
-[model-cache-policy.md](model-cache-policy.md).
+A practical guide to the P1 safe-exec core and the P2 broker seam: the policy schema,
+the result schema, the `bls` CLI, the security model, and worked examples. For the
+project overview see the [README](../README.md); for the model-weight rules see
+[model-cache-policy.md](model-cache-policy.md); for the full P2 request/wrapper
+contract see [P2_BROKER_LOOM_SEAM.md](P2_BROKER_LOOM_SEAM.md).
 
 - [1. Install / run](#1-install--run)
 - [2. Concepts](#2-concepts)
@@ -104,9 +105,16 @@ JSON in / JSON out. Global flag: `--pretty`.
 | `bls preflight --policy P` | inspect posture; **never executes** | `0` ok, `1` warnings |
 | `bls run --policy P [--timeout S] [--cwd D] -- ARGV…` | default-deny sandboxed run | `0` ok · `1` ran-but-nonzero · `2` denied/spawn-error · `124` timeout |
 | `bls models [--catalog C]` | list model manifests (no weights) | `0` |
+| `bls broker-run --request R` | P2 broker seam: JSON request in, JSON wrapper out | `0` ok · `1` ran-but-nonzero · `2` denied/spawn-error/request-error · `124` timeout |
 
 `--timeout` / `--cwd` on `run` override the policy's `timeout_seconds` / `working_dir`
 for that invocation. Put the command after `--`.
+
+`broker-run` reads a full request (inline policy + argv + optional `stdin` /
+`timeout_seconds` / `working_dir` overrides) from `--request` and wraps the
+`ExecResult` in a correlation envelope; a malformed request returns a structured
+`request_error` wrapper (exit `2`), never a crash. Full request/wrapper schema:
+[P2_BROKER_LOOM_SEAM.md](P2_BROKER_LOOM_SEAM.md).
 
 `preflight` reports: default-deny posture, whether each allow-listed command resolves on
 `PATH`, the env-scrub plan (**names only**), the network posture, rlimit support, the
