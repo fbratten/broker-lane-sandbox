@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -183,3 +184,126 @@ def test_broker_run_cli_malformed_limit_is_clean_request_error(tmp_path, capsys)
     assert payload["request_id"] == "job-bad-limit"
     assert "boolean" in payload["reason"]
     assert "never runs" not in payload["reason"]
+
+# --- contract-gap batch (finalization audit F11-F14, F19) --------------------
+
+def test_broker_request_stdin_reaches_child() -> None:
+    # Seam doc: `stdin` is optional text passed to the child's standard input.
+    wrapper = run_broker_request(
+        {
+            "schema_version": 1,
+            "request_id": "job-stdin",
+            "policy": POLICY,
+            "argv": ["python3", "-c", "import sys; print(sys.stdin.read().strip())"],
+            "stdin": "ping\n",
+        }
+    )
+    assert wrapper["result"]["status"] == "ok"
+    assert wrapper["result"]["stdout"] == "ping\n"
+
+
+def test_broker_request_rejects_non_string_stdin() -> None:
+    with pytest.raises(BrokerRunError, match="stdin must be a string or null"):
+        run_broker_request(
+            {"schema_version": 1, "policy": POLICY,
+             "argv": ["python3", "-c", "print(1)"], "stdin": 123}
+        )
+
+
+def test_broker_request_top_level_timeout_overrides_policy() -> None:
+    # Seam doc: request-level timeout_seconds overrides the inline policy's value.
+    wrapper = run_broker_request(
+        {
+            "schema_version": 1,
+            "request_id": "job-timeout-override",
+            "policy": {**POLICY, "timeout_seconds": 30},
+            "timeout_seconds": 1,
+            "argv": ["python3", "-c", "import time; time.sleep(30)"],
+        }
+    )
+    assert wrapper["result"]["status"] == "timeout"
+    assert wrapper["result"]["ok"] is False
+    assert wrapper["result"]["limits"]["timeout_seconds"] == 1
+
+
+def test_broker_request_top_level_working_dir_overrides_policy(tmp_path) -> None:
+    # Seam doc: request-level working_dir is a per-request cwd override.
+    wrapper = run_broker_request(
+        {
+            "schema_version": 1,
+            "policy": POLICY,
+            "working_dir": str(tmp_path),
+            "argv": ["python3", "-c", "import os; print(os.getcwd())"],
+        }
+    )
+    assert wrapper["result"]["status"] == "ok"
+    assert Path(wrapper["result"]["stdout"].strip()).resolve() == tmp_path.resolve()
+
+
+def test_broker_request_rejects_wrong_or_missing_schema_version() -> None:
+    # Seam doc: request schema_version is required and must equal the supported one.
+    with pytest.raises(BrokerRunError, match="schema_version"):
+        run_broker_request(
+            {"schema_version": 2, "policy": POLICY, "argv": ["python3", "-c", "print(1)"]}
+        )
+    with pytest.raises(BrokerRunError, match="schema_version"):
+        run_broker_request(
+            {"policy": POLICY, "argv": ["python3", "-c", "print(1)"]}
+        )
+
+
+def test_broker_run_cli_exit_one_for_child_nonzero(tmp_path, capsys) -> None:
+    # Exit-code table at the seam boundary: 1 = ran but exited non-zero.
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {"schema_version": 1, "request_id": "cli-exit7", "policy": POLICY,
+             "argv": ["python3", "-c", "import sys; sys.exit(7)"]}
+        ),
+        encoding="utf-8",
+    )
+    exit_code = main(["broker-run", "--request", str(request_path)])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert payload["result"]["status"] == "exit_nonzero"
+    assert payload["result"]["exit_code"] == 7
+
+
+def test_broker_run_cli_exit_124_for_timeout(tmp_path, capsys) -> None:
+    # Exit-code table at the seam boundary: 124 = wall-clock timeout.
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {"schema_version": 1, "request_id": "cli-timeout",
+             "policy": {**POLICY, "timeout_seconds": 1},
+             "argv": ["python3", "-c", "import time; time.sleep(30)"]}
+        ),
+        encoding="utf-8",
+    )
+    exit_code = main(["broker-run", "--request", str(request_path)])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 124
+    assert payload["result"]["status"] == "timeout"
+    assert payload["result"]["exit_code"] not in (0, None)
+
+
+def test_broker_run_cli_unparseable_request_file_is_request_error(tmp_path, capsys) -> None:
+    # Seam doc: a body that cannot be parsed as JSON returns a request_error
+    # wrapper with request_id null and exit 2 -- never a traceback.
+    request_path = tmp_path / "request.json"
+    request_path.write_text("not json {", encoding="utf-8")
+    exit_code = main(["broker-run", "--request", str(request_path)])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 2
+    assert payload["status"] == "request_error"
+    assert payload["ok"] is False
+    assert payload["request_id"] is None
+
+
+def test_broker_run_cli_missing_request_file_is_request_error(capsys) -> None:
+    exit_code = main(["broker-run", "--request", "/no/such/dir/request.json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 2
+    assert payload["status"] == "request_error"
+    assert payload["ok"] is False
+    assert payload["request_id"] is None
