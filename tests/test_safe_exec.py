@@ -130,6 +130,33 @@ def test_policy_accepts_integral_float_limits():
     assert p.max_output_bytes == 10**6 and isinstance(p.max_output_bytes, int)
 
 
+# --- env passthrough-prefix hardening: an empty prefix must never match all --
+
+def test_policy_rejects_empty_or_nonstring_passthrough_prefixes():
+    # "" (and whitespace) would make name.startswith(pfx) True for EVERY env
+    # name, passing the entire environment through -- must fail loud.
+    with pytest.raises(PolicyError):
+        SandboxPolicy(env_passthrough_prefixes=[""])
+    with pytest.raises(PolicyError):
+        SandboxPolicy(env_passthrough_prefixes=["  "])
+    with pytest.raises(PolicyError):
+        SandboxPolicy(env_passthrough_prefixes=[123])
+    with pytest.raises(PolicyError):
+        SandboxPolicy(env_passthrough_prefixes="MYAPP_")   # not a list
+    with pytest.raises(PolicyError):
+        SandboxPolicy(env_allowlist=[None])
+
+
+def test_env_scrub_ignores_empty_prefix_even_if_mutated(monkeypatch):
+    # Defense in depth: construction rejects "" but a mutated policy object
+    # still must not pass the whole environment through.
+    monkeypatch.setenv("RANDOM_UNRELATED_VAR", "x")
+    p = _exec_policy(env_allowlist=[])
+    p.env_passthrough_prefixes = [""]        # bypass __post_init__ deliberately
+    child, _ = build_child_env(p)
+    assert "RANDOM_UNRELATED_VAR" not in child
+
+
 # --- F1 regression: only BARE command names may pass the gate ----------------
 
 def test_is_bare_command_helper():
@@ -437,6 +464,17 @@ def test_cli_preflight(tmp_path, capsys):
     assert rc in (0, 1)
 
 
+@requires_python
+def test_executor_non_utf8_output_returns_result_not_crash():
+    # A policy-permitted command may emit arbitrary bytes; that must come back
+    # as an ExecResult with replacement characters, never a UnicodeDecodeError.
+    prog = "import sys; sys.stdout.buffer.write(b'\\xff\\xfebad\\xff'); sys.stdout.buffer.flush()"
+    r = SafeExecutor(_exec_policy()).run([PYBIN, "-c", prog])
+    assert r.status == Status.OK and r.ok is True
+    assert "bad" in r.stdout
+    json.dumps(r.to_dict())   # still JSON-serializable
+
+
 def test_cli_models_json_catalog(tmp_path, capsys):
     cat = tmp_path / "models.json"
     cat.write_text(json.dumps({
@@ -448,6 +486,19 @@ def test_cli_models_json_catalog(tmp_path, capsys):
     out = json.loads(capsys.readouterr().out)
     assert rc == 0 and out["count"] == 1 and "demo" in out["profiles"]
     assert out["profiles"]["demo"]["runner"] == "llama.cpp"
+
+
+def test_catalog_malformed_profile_fails_loud(tmp_path):
+    # A profile whose value is not a mapping must raise PolicyError with a clear
+    # message, not an opaque AttributeError from prof.get(...).
+    from broker_lane_sandbox.catalog import list_profiles
+    cat = tmp_path / "models.json"
+    cat.write_text(json.dumps({"schema_version": 1, "profiles": {"foo": "notadict"}}))
+    with pytest.raises(PolicyError, match="profile 'foo'"):
+        list_profiles(cat)
+    cat.write_text(json.dumps({"schema_version": 1, "profiles": ["not", "a", "dict"]}))
+    with pytest.raises(PolicyError, match="'profiles' must be a mapping"):
+        list_profiles(cat)
 
 
 def test_example_policy_loads():

@@ -147,6 +147,22 @@ class SandboxPolicy:
         )
         if not isinstance(self.allowed_commands, list):
             raise PolicyError("allowed_commands must be a list")
+        if not isinstance(self.env_allowlist, list) or not all(
+            isinstance(n, str) for n in self.env_allowlist
+        ):
+            raise PolicyError("env_allowlist must be a list of strings")
+        # An empty (or whitespace) prefix would match EVERY env name and pass the
+        # entire environment through, defeating the default-empty guarantee.
+        if not isinstance(self.env_passthrough_prefixes, list) or not all(
+            isinstance(p, str) for p in self.env_passthrough_prefixes
+        ):
+            raise PolicyError("env_passthrough_prefixes must be a list of strings")
+        for p in self.env_passthrough_prefixes:
+            if not p.strip():
+                raise PolicyError(
+                    "env_passthrough_prefixes entries must be non-empty "
+                    f"(an empty prefix matches every env name), got {p!r}"
+                )
 
     # --- construction --------------------------------------------------------
 

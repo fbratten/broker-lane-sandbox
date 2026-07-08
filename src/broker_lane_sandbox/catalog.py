@@ -29,6 +29,13 @@ def list_profiles(path: str | Path) -> dict:
     """Return a JSON-friendly summary of the catalog's model profiles."""
     data = load_catalog(path)
     profiles = data.get("profiles", {}) or {}
+    if not isinstance(profiles, dict):
+        raise PolicyError(f"catalog {path}: 'profiles' must be a mapping/object")
+    for name, prof in profiles.items():
+        if not isinstance(prof, dict):
+            raise PolicyError(
+                f"catalog {path}: profile {name!r} must be a mapping/object"
+            )
     summary = {
         name: {
             "runner": prof.get("runner"),

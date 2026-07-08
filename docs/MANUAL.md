@@ -167,6 +167,9 @@ a bounded-resource executor — sized for a **single-operator personal tool**.
   property), not per-job; `max_file_size_bytes` caps each **individual file** a child
   writes (SIGXFSZ past the cap) — it is **not** a disk quota, so a child may still write
   many files each below the cap.
+- Child output is decoded as UTF-8 with **replacement characters** for invalid bytes
+  (`errors="replace"`), so a binary-emitting child still returns a JSON `ExecResult`
+  — raw bytes are not preserved.
 
 These boundaries were confirmed by an adversarial review: the path-bypass, timeout-defeat,
 rlimit-crash, and guard-fail-open defects were real and fixed; the kernel/identity-pinning

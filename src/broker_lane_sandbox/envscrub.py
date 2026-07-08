@@ -24,7 +24,9 @@ _PROXY_VARS = (
 def _name_allowed(name: str, policy: SandboxPolicy) -> bool:
     if name in policy.env_allowlist:
         return True
-    return any(name.startswith(pfx) for pfx in policy.env_passthrough_prefixes)
+    # Empty prefixes are rejected at policy construction; the `if pfx` guard is
+    # belt-and-braces so a mutated policy still cannot match every name.
+    return any(name.startswith(pfx) for pfx in policy.env_passthrough_prefixes if pfx)
 
 
 def build_child_env(

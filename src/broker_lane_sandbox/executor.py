@@ -75,6 +75,7 @@ class SafeExecutor:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                errors="replace",              # non-UTF-8 output must yield a result, not a crash
                 preexec_fn=preexec,            # POSIX: setsid + rlimits; None elsewhere
                 close_fds=True,
             )
