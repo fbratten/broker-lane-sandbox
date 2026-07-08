@@ -307,3 +307,16 @@ def test_broker_run_cli_missing_request_file_is_request_error(capsys) -> None:
     assert payload["status"] == "request_error"
     assert payload["ok"] is False
     assert payload["request_id"] is None
+
+
+def test_broker_run_cli_non_utf8_request_file_is_request_error(tmp_path, capsys) -> None:
+    # A request FILE with non-UTF-8 bytes is just another unreadable body:
+    # structured request_error + exit 2, never a UnicodeDecodeError traceback.
+    request_path = tmp_path / "request.json"
+    request_path.write_bytes(b"\xff\xfe{bad")
+    exit_code = main(["broker-run", "--request", str(request_path)])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 2
+    assert payload["status"] == "request_error"
+    assert payload["ok"] is False
+    assert payload["request_id"] is None
