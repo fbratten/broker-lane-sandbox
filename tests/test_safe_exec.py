@@ -130,6 +130,33 @@ def test_policy_accepts_integral_float_limits():
     assert p.max_output_bytes == 10**6 and isinstance(p.max_output_bytes, int)
 
 
+# --- env passthrough-prefix hardening: an empty prefix must never match all --
+
+def test_policy_rejects_empty_or_nonstring_passthrough_prefixes():
+    # "" (and whitespace) would make name.startswith(pfx) True for EVERY env
+    # name, passing the entire environment through -- must fail loud.
+    with pytest.raises(PolicyError):
+        SandboxPolicy(env_passthrough_prefixes=[""])
+    with pytest.raises(PolicyError):
+        SandboxPolicy(env_passthrough_prefixes=["  "])
+    with pytest.raises(PolicyError):
+        SandboxPolicy(env_passthrough_prefixes=[123])
+    with pytest.raises(PolicyError):
+        SandboxPolicy(env_passthrough_prefixes="MYAPP_")   # not a list
+    with pytest.raises(PolicyError):
+        SandboxPolicy(env_allowlist=[None])
+
+
+def test_env_scrub_ignores_empty_prefix_even_if_mutated(monkeypatch):
+    # Defense in depth: construction rejects "" but a mutated policy object
+    # still must not pass the whole environment through.
+    monkeypatch.setenv("RANDOM_UNRELATED_VAR", "x")
+    p = _exec_policy(env_allowlist=[])
+    p.env_passthrough_prefixes = [""]        # bypass __post_init__ deliberately
+    child, _ = build_child_env(p)
+    assert "RANDOM_UNRELATED_VAR" not in child
+
+
 # --- F1 regression: only BARE command names may pass the gate ----------------
 
 def test_is_bare_command_helper():
@@ -437,6 +464,123 @@ def test_cli_preflight(tmp_path, capsys):
     assert rc in (0, 1)
 
 
+# --- contract-gap batch (finalization audit F13, F15-F18, F20-F21) -----------
+
+def test_env_scrub_online_keeps_proxies_and_signals_online(monkeypatch):
+    # README: `network: "online"` opts out -- SANDBOX_NETWORK=online, proxies
+    # allow-listed through survive, and NO_PROXY=* is NOT injected.
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+    p = _exec_policy(env_allowlist=["HTTPS_PROXY"], network="online")
+    child, _ = build_child_env(p)
+    assert child["SANDBOX_NETWORK"] == "online"
+    assert child["HTTPS_PROXY"] == "http://proxy.example:3128"
+    assert "NO_PROXY" not in child and "no_proxy" not in child
+
+
+def test_env_scrub_passthrough_prefix_allows_and_still_drops_secrets(monkeypatch):
+    # MANUAL: env_passthrough_prefixes passes matching names through; the
+    # secret-name guard still applies to prefix-matched names.
+    monkeypatch.setenv("MYAPP_MODE", "fast")
+    monkeypatch.setenv("MYAPP_OTHER_VAR", "y")
+    monkeypatch.delenv("OTHER_VAR", raising=False)
+    monkeypatch.setenv("OTHER_VAR", "z")
+    monkeypatch.setenv("MYAPP_API_KEY", "not-a-real-secret")
+    p = _exec_policy(env_allowlist=[], env_passthrough_prefixes=["MYAPP_"])
+    child, dropped = build_child_env(p)
+    assert child["MYAPP_MODE"] == "fast" and child["MYAPP_OTHER_VAR"] == "y"
+    assert "OTHER_VAR" not in child
+    assert "MYAPP_API_KEY" not in child and "MYAPP_API_KEY" in dropped
+
+
+def test_executor_denies_empty_argv():
+    # Gate 1: empty argv is a denied RESULT, never an IndexError crash.
+    r = SafeExecutor(_exec_policy()).run([])
+    assert r.status == Status.DENIED and r.ok is False
+    assert "empty argv" in r.reason
+
+
+def test_executor_spawn_error_for_missing_executable():
+    # MANUAL: an allow-listed command that does not resolve on PATH is a
+    # spawn_error result, not a crash.
+    missing = "definitely-not-a-real-binary-xyz"
+    p = _exec_policy(allowed_commands=[missing])
+    r = SafeExecutor(p).run([missing, "--version"])
+    assert r.status == Status.SPAWN_ERROR and r.ok is False
+    assert "could not start process" in r.reason
+
+
+def test_cli_run_empty_argv_after_dashes_is_denied(tmp_path, capsys):
+    pf = tmp_path / "p.json"
+    pf.write_text(json.dumps({"schema_version": SCHEMA_VERSION, "allow_exec": True,
+                              "allowed_commands": ["echo"]}))
+    rc = cli.main(["run", "--policy", str(pf), "--"])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 2 and out["status"] == Status.DENIED
+    assert "no command given" in out["reason"]
+
+
+@requires_python
+def test_cli_run_exit_one_for_child_nonzero(tmp_path, capsys):
+    # Documented exit-code table: 1 = ran but exited non-zero.
+    policy = {"schema_version": SCHEMA_VERSION, "allow_exec": True,
+              "allowed_commands": [PYBIN], "network": "offline"}
+    pf = tmp_path / "p.json"
+    pf.write_text(json.dumps(policy))
+    rc = cli.main(["run", "--policy", str(pf), "--", PYBIN, "-c", "import sys; sys.exit(7)"])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 1 and out["status"] == Status.EXIT_NONZERO and out["exit_code"] == 7
+
+
+@requires_python
+def test_cli_run_timeout_flag_overrides_policy_and_exits_124(tmp_path, capsys):
+    # Documented: --timeout overrides policy timeout_seconds; timeout exits 124.
+    policy = {"schema_version": SCHEMA_VERSION, "allow_exec": True,
+              "allowed_commands": [PYBIN], "network": "offline",
+              "timeout_seconds": 30}
+    pf = tmp_path / "p.json"
+    pf.write_text(json.dumps(policy))
+    rc = cli.main(["run", "--policy", str(pf), "--timeout", "1", "--",
+                   PYBIN, "-c", "import time; time.sleep(30)"])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 124 and out["status"] == Status.TIMEOUT
+    assert out["limits"]["timeout_seconds"] == 1
+
+
+@requires_python
+def test_cli_run_cwd_flag_overrides_policy(tmp_path, capsys):
+    policy = {"schema_version": SCHEMA_VERSION, "allow_exec": True,
+              "allowed_commands": [PYBIN], "network": "offline"}
+    pf = tmp_path / "p.json"
+    pf.write_text(json.dumps(policy))
+    rc = cli.main(["run", "--policy", str(pf), "--cwd", str(tmp_path), "--",
+                   PYBIN, "-c", "import os; print(os.getcwd())"])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert Path(out["stdout"].strip()).resolve() == tmp_path.resolve()
+
+
+def test_cli_preflight_exit_one_on_warnings(tmp_path, capsys):
+    # Documented mapping: preflight exits 1 when the report carries warnings.
+    pf = tmp_path / "p.json"
+    pf.write_text(json.dumps({"schema_version": SCHEMA_VERSION, "allow_exec": True,
+                              "allowed_commands": ["definitely-not-a-real-binary-xyz"]}))
+    rc = cli.main(["preflight", "--policy", str(pf)])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 1 and out["ok"] is False
+    assert any("not found on PATH" in w for w in out["warnings"])
+
+
+@requires_python
+def test_executor_non_utf8_output_returns_result_not_crash():
+    # A policy-permitted command may emit arbitrary bytes; that must come back
+    # as an ExecResult with replacement characters, never a UnicodeDecodeError.
+    prog = "import sys; sys.stdout.buffer.write(b'\\xff\\xfebad\\xff'); sys.stdout.buffer.flush()"
+    r = SafeExecutor(_exec_policy()).run([PYBIN, "-c", prog])
+    assert r.status == Status.OK and r.ok is True
+    assert "bad" in r.stdout
+    json.dumps(r.to_dict())   # still JSON-serializable
+
+
 def test_cli_models_json_catalog(tmp_path, capsys):
     cat = tmp_path / "models.json"
     cat.write_text(json.dumps({
@@ -448,6 +592,28 @@ def test_cli_models_json_catalog(tmp_path, capsys):
     out = json.loads(capsys.readouterr().out)
     assert rc == 0 and out["count"] == 1 and "demo" in out["profiles"]
     assert out["profiles"]["demo"]["runner"] == "llama.cpp"
+
+
+def test_cli_models_missing_catalog_is_clean_json_error(tmp_path, capsys):
+    # On an installed copy the default catalog path does not exist; the CLI must
+    # return clean JSON + exit 2, never a FileNotFoundError traceback.
+    rc = cli.main(["models", "--catalog", str(tmp_path / "nope.json")])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 2 and out["ok"] is False
+    assert "catalog not found" in out["error"]
+
+
+def test_catalog_malformed_profile_fails_loud(tmp_path):
+    # A profile whose value is not a mapping must raise PolicyError with a clear
+    # message, not an opaque AttributeError from prof.get(...).
+    from broker_lane_sandbox.catalog import list_profiles
+    cat = tmp_path / "models.json"
+    cat.write_text(json.dumps({"schema_version": 1, "profiles": {"foo": "notadict"}}))
+    with pytest.raises(PolicyError, match="profile 'foo'"):
+        list_profiles(cat)
+    cat.write_text(json.dumps({"schema_version": 1, "profiles": ["not", "a", "dict"]}))
+    with pytest.raises(PolicyError, match="'profiles' must be a mapping"):
+        list_profiles(cat)
 
 
 def test_example_policy_loads():

@@ -93,7 +93,10 @@ def cmd_broker_run(args) -> int:
         if isinstance(data, dict) and isinstance(data.get("request_id"), str):
             request_id = data["request_id"]
         wrapper = run_broker_request(data)
-    except (OSError, json.JSONDecodeError, BrokerRunError, PolicyError, TypeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError,
+            BrokerRunError, PolicyError, TypeError) as exc:
+        # UnicodeDecodeError: a non-UTF-8 request FILE must be a structured
+        # request_error (exit 2), same as any other unreadable/unparseable body.
         wrapper = request_error(str(exc), request_id)
         _emit(wrapper, args.pretty)
         return 2
@@ -105,8 +108,22 @@ def cmd_broker_run(args) -> int:
 def cmd_models(args) -> int:
     from .catalog import list_profiles
 
-    catalog = args.catalog or _default_catalog()
-    summary = list_profiles(catalog)
+    catalog = Path(args.catalog) if args.catalog else _default_catalog()
+    try:
+        summary = list_profiles(catalog)
+    except OSError as exc:
+        # The default resolves relative to a SOURCE CHECKOUT; an installed copy
+        # has no repo root above it. Fail with clean JSON, not a traceback.
+        # (Catching the read error, not pre-checking is_file(), keeps
+        # non-regular-file paths like process substitution working.)
+        _emit(
+            {"ok": False,
+             "error": f"catalog not found or not readable: {catalog} ({exc}). "
+                      "Pass --catalog PATH (the default models.example.yaml "
+                      "only resolves from a source checkout)."},
+            args.pretty,
+        )
+        return 2
     _emit(summary, args.pretty)
     return 0
 

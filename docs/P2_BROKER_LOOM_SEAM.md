@@ -102,8 +102,10 @@ Malformed broker requests never spawn a child process. They emit JSON and exit `
 
 `request_error` is a wrapper status, not an `ExecResult.status`. `request_id` is echoed
 unchanged whenever the request provided one (a string) and the body parsed as JSON —
-including on this error path. It is `null` only when the request omitted `request_id`, or
-when the body could not be parsed as JSON at all (as in the example above).
+including on this error path. It is `null` when the request omitted `request_id`
+(as in the example above), supplied a non-string `request_id` (only string ids are
+echoed; the request is rejected with `request_error`), or when the request file
+could not be read or parsed as JSON at all.
 
 ## Exit Codes
 

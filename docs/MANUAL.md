@@ -1,9 +1,10 @@
 # broker-lane-sandbox — Manual
 
-A practical guide to the P1 safe-exec core: the policy schema, the result schema, the
-`bls` CLI, the security model, and worked examples. For the project overview see the
-[README](../README.md); for the model-weight rules see
-[model-cache-policy.md](model-cache-policy.md).
+A practical guide to the P1 safe-exec core and the P2 broker seam: the policy schema,
+the result schema, the `bls` CLI, the security model, and worked examples. For the
+project overview see the [README](../README.md); for the model-weight rules see
+[model-cache-policy.md](model-cache-policy.md); for the full P2 request/wrapper
+contract see [P2_BROKER_LOOM_SEAM.md](P2_BROKER_LOOM_SEAM.md).
 
 - [1. Install / run](#1-install--run)
 - [2. Concepts](#2-concepts)
@@ -40,7 +41,7 @@ Enable the model-artifact guard and run the tests:
 
 ```bash
 git config core.hooksPath .githooks
-python3 -m pytest tests/ -q          # 42 tests
+python3 -m pytest tests/ -q          # 96 tests
 ```
 
 ## 2. Concepts
@@ -103,10 +104,17 @@ JSON in / JSON out. Global flag: `--pretty`.
 | `bls version` | print name / version / schema_version | `0` |
 | `bls preflight --policy P` | inspect posture; **never executes** | `0` ok, `1` warnings |
 | `bls run --policy P [--timeout S] [--cwd D] -- ARGV…` | default-deny sandboxed run | `0` ok · `1` ran-but-nonzero · `2` denied/spawn-error · `124` timeout |
-| `bls models [--catalog C]` | list model manifests (no weights) | `0` |
+| `bls models [--catalog C]` | list model manifests (no weights) | `0` ok · `2` catalog not found (pass `--catalog` on installed copies; the default path resolves only from a source checkout) |
+| `bls broker-run --request R` | P2 broker seam: JSON request in, JSON wrapper out | `0` ok · `1` ran-but-nonzero · `2` denied/spawn-error/request-error · `124` timeout |
 
 `--timeout` / `--cwd` on `run` override the policy's `timeout_seconds` / `working_dir`
 for that invocation. Put the command after `--`.
+
+`broker-run` reads a full request (inline policy + argv + optional `stdin` /
+`timeout_seconds` / `working_dir` overrides) from `--request` and wraps the
+`ExecResult` in a correlation envelope; a malformed request returns a structured
+`request_error` wrapper (exit `2`), never a crash. Full request/wrapper schema:
+[P2_BROKER_LOOM_SEAM.md](P2_BROKER_LOOM_SEAM.md).
 
 `preflight` reports: default-deny posture, whether each allow-listed command resolves on
 `PATH`, the env-scrub plan (**names only**), the network posture, rlimit support, the
@@ -159,6 +167,9 @@ a bounded-resource executor — sized for a **single-operator personal tool**.
   property), not per-job; `max_file_size_bytes` caps each **individual file** a child
   writes (SIGXFSZ past the cap) — it is **not** a disk quota, so a child may still write
   many files each below the cap.
+- Child output is decoded as UTF-8 with **replacement characters** for invalid bytes
+  (`errors="replace"`), so a binary-emitting child still returns a JSON `ExecResult`
+  — raw bytes are not preserved.
 
 These boundaries were confirmed by an adversarial review: the path-bypass, timeout-defeat,
 rlimit-crash, and guard-fail-open defects were real and fixed; the kernel/identity-pinning

@@ -91,6 +91,25 @@ def test_guard_passes_clean_tree(tmp_path):
     assert _guard(repo, "--tracked").returncode == 0
 
 
+def test_guard_refuses_nested_cache_dir(tmp_path):
+    # .gitignore's unanchored patterns match cache dirs at ANY depth; the guard
+    # must match the same way, or `git add -f tests/models/w.dat` slips past.
+    repo = _init_repo(tmp_path)
+    (repo / "tests" / "models").mkdir(parents=True)
+    (repo / "tests" / "models" / "weights.dat").write_text("x")   # no weight ext
+    run(["git", "add", "-f", "tests/models/weights.dat"], cwd=repo)
+    cp = _guard(repo, "--staged")
+    assert cp.returncode == VIOLATION_EXIT, cp.stderr
+    assert "tests/models/weights.dat" in cp.stderr
+
+
+def test_precommit_hook_is_tracked_executable():
+    # git refuses to run a non-executable hook: without the +x bit the
+    # README-documented enablement (core.hooksPath .githooks) silently no-ops.
+    out = run(["git", "ls-files", "-s", ".githooks/pre-commit"], cwd=REPO_ROOT).stdout
+    assert out.startswith("100755"), f"pre-commit hook must be tracked 100755, got: {out!r}"
+
+
 def test_real_repo_tracked_tree_is_clean():
     # The actual broker-lane-sandbox tracked tree must contain zero weight blobs.
     cp = subprocess.run(

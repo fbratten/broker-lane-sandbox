@@ -45,8 +45,9 @@ a contract, where the execution-safety concern can be reviewed and hardened on i
 
 Architectural rule: in broker-loom, the **OpenRouter lane is a verifier/spec lane and
 never executes**. The **execution** lanes are what this sandbox wraps. The two repos
-are developed and versioned independently; broker-loom integration is **P2** (not yet
-built).
+are developed and versioned independently; the sandbox-side **P2** seam (`bls
+broker-run`, JSON request in / JSON wrapper out) is delivered — consuming it is
+the next slice on the broker-loom side.
 
 ## What it does / does NOT do
 
@@ -66,8 +67,9 @@ built).
   env-level neutralization, not a network namespace; filesystem access is not jailed.
 - It does **not** pin command identity (no `realpath`/hash of the binary) — it gates
   the **invocation name** and resolves it on `PATH`.
-- It does **not** download or run real models (P3); it does **not** stream (P4); it
-  does **not** yet integrate with broker-loom (P2).
+- It does **not** download or run real models (P3); it does **not** stream (P4).
+  The sandbox-side broker-loom seam (P2, `bls broker-run`) is delivered, but
+  broker-loom-side consumption is not built here.
 - It is **not** enterprise-grade or multi-tenant; it is a single-operator personal tool.
 
 ## Safe-exec model (default-deny)
@@ -165,7 +167,13 @@ bls version                                          # name, version, schema_ver
 bls preflight --policy policy.example.json           # inspect posture — no execution
 bls run       --policy policy.example.json -- echo hi # default-deny sandboxed run
 bls models                                            # list model manifests (no weights)
+bls broker-run --request request.json                # broker-loom JSON request seam (P2)
 ```
+
+`broker-run` wraps a full request (inline policy + argv + optional stdin) and
+returns a JSON wrapper with the `ExecResult` inside; a malformed request comes
+back as a structured `request_error` (exit 2), never a crash. See
+[`docs/P2_BROKER_LOOM_SEAM.md`](docs/P2_BROKER_LOOM_SEAM.md).
 
 Run from a source checkout without installing:
 
@@ -174,7 +182,7 @@ PYTHONPATH=src python3 -m broker_lane_sandbox.cli version
 ```
 
 A starter policy is in `policy.example.json` (default-deny; allows `echo`/`python3`,
-offline, with CPU/AS/process caps). See **`docs/MANUAL.md`** for the full policy schema,
+offline, with CPU/AS/process/per-file-write-size caps). See **`docs/MANUAL.md`** for the full policy schema,
 result schema, exit-code table, and worked examples.
 
 ## Current phase / status
@@ -189,18 +197,20 @@ result schema, exit-code table, and worked examples.
 
 P1 shipped with an adversarial review (4 lenses + per-finding skeptic verification);
 4 confirmed defects were fixed and re-verified (default-deny path bypass, timeout
-defeat, rlimit crash, guard fail-open). **42 tests pass**, stdlib-only.
+defeat, rlimit crash, guard fail-open). The suite has since grown with the P2 seam,
+the resource-limit contract hardening, and the 2026-07 finalization audit:
+**96 tests pass**, stdlib-only.
 
 ## Develop
 
 ```bash
 git config core.hooksPath .githooks                  # enable the model-artifact guard
-python3 -m pytest tests/ -q                           # full suite (42 tests)
+python3 -m pytest tests/ -q                           # full suite (96 tests)
 python3 scripts/check_model_artifacts.py --tracked    # audit the tracked tree
 ```
 
-Layout: `src/broker_lane_sandbox/` (policy, envscrub, limits, executor, preflight,
-catalog, result, cli, runners), `scripts/check_model_artifacts.py` (INVARIANT-1 guard),
+Layout: `src/broker_lane_sandbox/` (policy, envscrub, limits, executor, broker_run,
+preflight, catalog, result, cli, runners), `scripts/check_model_artifacts.py` (INVARIANT-1 guard),
 `tests/`, `docs/`. Python ≥ 3.10, zero runtime dependencies (PyYAML optional, for YAML
 policies/catalogs; JSON works with the stdlib).
 
