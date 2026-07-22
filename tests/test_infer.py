@@ -334,7 +334,7 @@ def test_infer_end_to_end_stub_ok_with_redacted_argv(
     tmp_path, capsys, catalog_path, model_root, monkeypatch
 ):
     # §5 stub-binary test: proves the -f /dev/stdin prompt channel, the canonical
-    # argv (-no-cnv/--log-disable/--no-display-prompt), and the self-labeling
+    # argv (-no-cnv/--no-display-prompt/--simple-io), and the self-labeling
     # argv redaction (F9): no absolute local path in argv or the model block (F1).
     bindir = _write_stub(tmp_path, STUB_ECHO)
     monkeypatch.setenv("PATH", str(bindir))
@@ -357,8 +357,11 @@ def test_infer_end_to_end_stub_ok_with_redacted_argv(
     # D3: canonical argv flags are present in the recorded argv.
     argv = result["argv"]
     assert argv[0] == "llama-completion"
-    for flag in ("-no-cnv", "--no-display-prompt", "--simple-io", "--log-disable"):
+    for flag in ("-no-cnv", "--no-display-prompt", "--simple-io"):
         assert flag in argv
+    # A4: no log flag -- on modern builds --log-disable pauses the logger that
+    # also carries generated token text (upstream issue #10002).
+    assert "--log-disable" not in argv
     assert "-n" in argv and "8" in argv
 
     # F9: the model-path slot is the literal ${SANDBOX_MODEL_DIR}/<relative_path>.
@@ -380,6 +383,36 @@ def test_infer_end_to_end_stub_ok_with_redacted_argv(
     assert model["relative_path"] == "example/unit.gguf"
     assert model["sha256"] == WEIGHTS_SHA
     assert model["sha256_verified"] == "full"
+
+
+STUB_LEAK = """#!/bin/sh
+# Prints the -m value (the ABSOLUTE model path) to stderr like a load banner.
+got=""
+while IFS= read -r line || [ -n "$line" ]; do got="$got$line"; done
+printf 'llama_model_load: loading %s\\n' "$2" >&2
+printf 'OUT:%s\\n' "$got"
+"""
+
+
+def test_infer_scrubs_model_path_from_captured_output(
+    tmp_path, capsys, catalog_path, model_root, monkeypatch
+):
+    # A4: with no log flag in the canonical argv, a load banner naming the
+    # absolute weight path can reach stderr -- the infer layer must scrub it
+    # to the self-labeling ${SANDBOX_MODEL_DIR}/... form in ALL captured output.
+    bindir = _write_stub(tmp_path, STUB_LEAK)
+    monkeypatch.setenv("PATH", str(bindir))
+    rc, payload = _infer(
+        tmp_path,
+        capsys,
+        _base_request(catalog_path, profile="llama-unit", policy=dict(FULL_POLICY)),
+    )
+    assert rc == 0
+    result = payload["result"]
+    assert result["status"] == "ok"
+    assert "${SANDBOX_MODEL_DIR}/example/unit.gguf" in result["stderr"]
+    # Upgraded F1 claim: no absolute local path anywhere in the whole result.
+    assert str(model_root) not in json.dumps(result)
 
 
 def test_infer_llama_preflight_verifies_without_spawning(

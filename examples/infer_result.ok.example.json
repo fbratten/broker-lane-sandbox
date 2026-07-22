@@ -11,7 +11,6 @@
       "-no-cnv",
       "--no-display-prompt",
       "--simple-io",
-      "--log-disable",
       "-n", "256",
       "--temp", "0.2",
       "--seed", "7"

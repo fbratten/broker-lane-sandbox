@@ -271,7 +271,10 @@ allow-list the runner binary. See
   resolution, then stops — nothing is executed, `runner_version` stays null.
 - **Privacy.** The recorded `argv` self-labels the model path as
   `${<cache_dir_env>}/<relative_path>` — no absolute local path appears in argv or the
-  model block. `--log-disable` keeps the model-path load banner out of stderr.
+  model block; captured stdout/stderr are scrubbed of the absolute weight path and
+  cache root (replaced by their `${…}` label forms). No log flag is passed to the
+  runner — on modern llama.cpp builds `--log-disable` would silence generated token
+  text itself (upstream issue #10002).
 - **Policy guidance for model profiles.** Start from
   [`policy.model.example.json`](../policy.model.example.json). **Omit
   `address_space_bytes`**: llama.cpp mmaps weights by default and RLIMIT_AS gates mmap

@@ -247,7 +247,7 @@ def test_resolve_binary_ignores_non_executable_files(bin_dir, monkeypatch):
 def test_build_argv_exact_canonical_shape():
     # [D3]: exact-shape assertion of the code-owned canonical argv:
     # <binary> -m <abs> -f /dev/stdin -no-cnv --no-display-prompt
-    # --simple-io --log-disable -n <max_tokens>
+    # --simple-io -n <max_tokens>   (A4: no log flag)
     argv = build_argv("llama-completion", "/cache/models/tiny.gguf", max_tokens=64)
     assert argv == [
         "llama-completion",
@@ -256,7 +256,6 @@ def test_build_argv_exact_canonical_shape():
         "-no-cnv",
         "--no-display-prompt",
         "--simple-io",
-        "--log-disable",
         "-n", "64",
     ]
 
@@ -274,7 +273,6 @@ def test_build_argv_appends_temp_then_seed():
         "-no-cnv",
         "--no-display-prompt",
         "--simple-io",
-        "--log-disable",
         "-n", "8",
         "--temp", "0.5",
         "--seed", "7",

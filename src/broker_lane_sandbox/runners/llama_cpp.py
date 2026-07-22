@@ -6,12 +6,14 @@ Trust model:
     (contract D3/F2/L4-F2). The prompt is NEVER placed in argv (`-p`) or in
     the child environment under any code path -- a failed delivery fails
     loud, it never degrades.
-  * argv is CODE-OWNED and canonical (contract D3): `-no-cnv` is mandatory
-    (conversation mode auto-enables when the GGUF carries a chat template),
-    `--log-disable` keeps the load banner (and the absolute model path it
-    would print) out of stderr, `--no-display-prompt` prevents prompt echo
-    into stdout, and `-n` is always emitted (llama's default -1 = infinite
-    is never allowed, contract D7).
+  * argv is CODE-OWNED and canonical (contract D3, amended A4): `-no-cnv` is
+    mandatory (conversation mode auto-enables when the GGUF carries a chat
+    template), `--no-display-prompt` prevents prompt echo into stdout, and
+    `-n` is always emitted (llama's default -1 = infinite is never allowed,
+    contract D7). NO log flag is passed: on modern llama.cpp builds
+    `--log-disable` pauses the logger that ALSO carries generated token text
+    (upstream issue #10002), silencing the completion itself. Path hygiene
+    for the load banner is enforced by infer.py's post-capture scrub instead.
   * Binary identity (contract D9/F11/L4-F1): the family maps to the ordered
     code-owned candidate set CANDIDATE_BINARIES, resolved by BARE NAME with
     `shutil.which` against the SCRUBBED child env's PATH -- the exact PATH
@@ -112,7 +114,6 @@ def build_argv(
         "-no-cnv",
         "--no-display-prompt",
         "--simple-io",
-        "--log-disable",
         "-n", str(max_tokens),
     ]
     if temperature is not None:

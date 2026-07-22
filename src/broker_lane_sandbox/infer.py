@@ -29,6 +29,7 @@ and ``RunnerError`` never escape :func:`run_infer_request` -- they become
 """
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
@@ -381,14 +382,31 @@ def run_infer_request(
     )
     model_block["runner_binary"] = binary_name_run
 
+    # A4 path hygiene: modern llama.cpp routes token text through the same
+    # logger --log-disable would pause (upstream #10002), so the argv carries
+    # no log flag and the model-path leak is closed HERE instead: every
+    # occurrence of the resolved weight path or the cache root in captured
+    # output is replaced by its self-labeling ${env}/... form.
+    label = "${" + cache_dir_env + "}/" + resolved.relative_path
+    real_root = os.path.realpath(os.environ.get(cache_dir_env) or "")
+
+    def _scrub(text: str) -> str:
+        text = text.replace(resolved.abs_path, label)
+        if len(real_root) > 1:
+            text = text.replace(real_root, "${" + cache_dir_env + "}")
+        return text
+
+    stdout = _scrub(exec_result.stdout)
+    stderr = _scrub(exec_result.stderr)
+
     status = _EXEC_STATUS_MAP[exec_result.status]
     generation: dict = {}
     if status == "ok":
         generation = {
-            "text": exec_result.stdout,
+            "text": stdout,
             "usage": {
                 "prompt_chars": len(prompt),
-                "completion_chars": len(exec_result.stdout),
+                "completion_chars": len(stdout),
             },
             "finish_reason": "unknown",  # llama.cpp CLI does not report one (D5)
         }
@@ -398,8 +416,8 @@ def run_infer_request(
         reason=exec_result.reason,
         network=exec_result.network,
         exit_code=exec_result.exit_code,
-        stdout=exec_result.stdout,
-        stderr=exec_result.stderr,
+        stdout=stdout,
+        stderr=stderr,
         duration_ms=exec_result.duration_ms,
         truncated=exec_result.truncated,
         env_keys=list(exec_result.env_keys),
