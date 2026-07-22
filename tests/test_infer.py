@@ -471,6 +471,8 @@ def test_version_reports_exact_capabilities_list(capsys):
     rc = main(["version"])
     payload = json.loads(capsys.readouterr().out)
     assert rc == 0
-    assert payload["capabilities"] == ["run", "broker-run", "infer", "models", "preflight"]
+    assert payload["capabilities"] == [
+        "run", "broker-run", "infer", "models", "preflight", "infer-stream"
+    ]
     assert payload["schema_version"] == 1  # envelope version unchanged (D12)
     assert payload["version"] == "0.2.0"

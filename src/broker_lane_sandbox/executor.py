@@ -19,7 +19,9 @@ import os
 import signal
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 from .envscrub import build_child_env
 from .limits import build_preexec, limits_summary
@@ -27,6 +29,125 @@ from .policy import SandboxPolicy, is_bare_command
 from .result import ExecResult, Status
 
 _KILL_GRACE = 5.0  # seconds to wait for pipes to close after a timeout-kill
+
+
+@dataclass
+class PreparedChild:
+    """The gate-passed pre-spawn setup shared by every execution path (P4 S10).
+
+    Extracted so the P4 streaming variant reuses the EXACT same gate order,
+    scrubbed env, preexec (setsid + rlimits), and limits summary as
+    ``SafeExecutor.run`` -- the gate chain is never forked, only its consumers
+    differ (buffered ``communicate`` vs the incremental streaming relay).
+    """
+
+    cwd: Optional[str]
+    child_env: dict
+    preexec: Optional[object]
+    limits: dict
+
+
+def check_gates(policy: SandboxPolicy, argv: list[str]) -> Optional[ExecResult]:
+    """Run the pre-spawn default-deny gates. Return a denial/spawn-error
+    ExecResult if any gate fails, else None (all gates passed).
+
+    Gate order (identical for buffered and streaming execution):
+      1. argv non-empty; 2. allow_exec; 3. bare argv[0]; 4. allow-list;
+      5. working_dir exists.
+    """
+    if not argv:
+        return ExecResult.denied(argv, "empty argv")
+    if not policy.allow_exec:
+        return ExecResult.denied(argv, "execution disabled (allow_exec is false)")
+    if not is_bare_command(argv[0]):
+        # A path-bearing argv[0] would let an allow-listed *basename* run an
+        # arbitrary file; only bare names (resolved on PATH) may pass the gate.
+        return ExecResult.denied(
+            argv,
+            f"argv[0] must be a bare command name with no path component: {argv[0]!r}",
+        )
+    if not policy.is_command_allowed(argv[0]):
+        return ExecResult.denied(
+            argv, f"command {argv[0]!r} not in allowed_commands",
+        )
+    cwd = policy.working_dir
+    if cwd is not None and not Path(cwd).is_dir():
+        return ExecResult.spawn_error(argv, f"working_dir does not exist: {cwd}")
+    return None
+
+
+def prepare_child(policy: SandboxPolicy) -> PreparedChild:
+    """Build the scrubbed env + preexec + limits summary (post-gate). The
+    dropped-secret names are folded into ``limits`` exactly as ``run`` does."""
+    child_env, dropped_secret = build_child_env(policy)
+    preexec = build_preexec(policy)
+    limits = limits_summary(policy)
+    if dropped_secret:
+        limits["dropped_secret_env"] = sorted(dropped_secret)
+    return PreparedChild(
+        cwd=policy.working_dir, child_env=child_env, preexec=preexec, limits=limits,
+    )
+
+
+def spawn_child(
+    argv: list[str],
+    prepared: PreparedChild,
+    *,
+    input_text: Optional[str],
+    text_mode: bool,
+) -> subprocess.Popen:
+    """Spawn the child. ``text_mode`` True mirrors ``run`` (utf-8 text pipes,
+    buffered communicate); False gives BINARY unbuffered pipes for the P4
+    streaming relay's incremental reads + its own incremental UTF-8 decoder.
+    Raises the spawn exceptions; the caller converts them to spawn_error."""
+    kwargs: dict = dict(
+        cwd=prepared.cwd,
+        env=prepared.child_env,
+        stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        preexec_fn=prepared.preexec,   # POSIX: setsid + rlimits; None elsewhere
+        close_fds=True,
+    )
+    if text_mode:
+        kwargs.update(
+            text=True,
+            encoding="utf-8",   # deterministic on every platform/locale
+            errors="replace",   # non-UTF-8 output must yield a result, not a crash
+        )
+    else:
+        kwargs.update(bufsize=0)  # unbuffered binary pipes for incremental reads
+    return subprocess.Popen(argv, **kwargs)
+
+
+def assemble_exec_result(
+    *,
+    status: str,
+    argv: list[str],
+    reason: str,
+    exit_code: Optional[int],
+    stdout: str,
+    stderr: str,
+    duration_ms: int,
+    truncated: bool,
+    policy: SandboxPolicy,
+    child_env: dict,
+    limits: dict,
+) -> ExecResult:
+    """Build the ExecResult from finished-run pieces (shared by run + stream)."""
+    return ExecResult(
+        status=status,
+        argv=argv,
+        reason=reason,
+        exit_code=exit_code,
+        stdout=stdout,
+        stderr=stderr,
+        duration_ms=duration_ms,
+        truncated=truncated,
+        network=policy.network,
+        env_keys=sorted(k for k in child_env),
+        limits=limits,
+    )
 
 
 class SafeExecutor:
@@ -37,49 +158,15 @@ class SafeExecutor:
         policy = self.policy
         argv = list(argv)
 
-        # --- gate 1+2: default-deny + command allow-list --------------------
-        if not argv:
-            return ExecResult.denied(argv, "empty argv")
-        if not policy.allow_exec:
-            return ExecResult.denied(argv, "execution disabled (allow_exec is false)")
-        if not is_bare_command(argv[0]):
-            # A path-bearing argv[0] would let an allow-listed *basename* run an
-            # arbitrary file; only bare names (resolved on PATH) may pass the gate.
-            return ExecResult.denied(
-                argv,
-                f"argv[0] must be a bare command name with no path component: {argv[0]!r}",
-            )
-        if not policy.is_command_allowed(argv[0]):
-            return ExecResult.denied(
-                argv, f"command {argv[0]!r} not in allowed_commands",
-            )
+        denial = check_gates(policy, argv)
+        if denial is not None:
+            return denial
 
-        # --- gate 3: working dir --------------------------------------------
-        cwd = policy.working_dir
-        if cwd is not None and not Path(cwd).is_dir():
-            return ExecResult.spawn_error(argv, f"working_dir does not exist: {cwd}")
-
-        child_env, dropped_secret = build_child_env(policy)
-        preexec = build_preexec(policy)
-        limits = limits_summary(policy)
-        if dropped_secret:
-            limits["dropped_secret_env"] = sorted(dropped_secret)
+        prepared = prepare_child(policy)
 
         start = time.monotonic()
         try:
-            proc = subprocess.Popen(
-                argv,
-                cwd=cwd,
-                env=child_env,
-                stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",              # deterministic on every platform/locale
-                errors="replace",              # non-UTF-8 output must yield a result, not a crash
-                preexec_fn=preexec,            # POSIX: setsid + rlimits; None elsewhere
-                close_fds=True,
-            )
+            proc = spawn_child(argv, prepared, input_text=input_text, text_mode=True)
         except (FileNotFoundError, PermissionError, OSError, subprocess.SubprocessError) as exc:
             # SubprocessError covers a preexec/rlimit-setup failure (e.g. a requested
             # rlimit above the host's inherited hard ceiling); it is NOT an OSError.
@@ -108,7 +195,7 @@ class SafeExecutor:
             status = Status.EXIT_NONZERO
             reason = f"exited with code {proc.returncode}"
 
-        return ExecResult(
+        return assemble_exec_result(
             status=status,
             argv=argv,
             reason=reason,
@@ -117,9 +204,9 @@ class SafeExecutor:
             stderr=stderr,
             duration_ms=duration_ms,
             truncated=t1 or t2,
-            network=policy.network,
-            env_keys=sorted(k for k in child_env),
-            limits=limits,
+            policy=policy,
+            child_env=prepared.child_env,
+            limits=prepared.limits,
         )
 
 
