@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "request_id": "loom-task-1234-turn-2",
+  "profile": "tiny-llama-q4",
+  "catalog": "models.yaml",
+  "prompt": "Summarize the following notes in three bullet points: ...",
+  "params": {
+    "max_tokens": 256,
+    "temperature": 0.2,
+    "seed": 7
+  },
+  "policy": {
+    "schema_version": 1,
+    "_comment": "Model-profile policy: see policy.model.example.json -- address_space_bytes is deliberately omitted (RLIMIT_AS gates mmap'd GGUF loads).",
+    "allow_exec": true,
+    "allowed_commands": ["llama-completion", "llama-cli"],
+    "env_allowlist": ["PATH", "HOME", "TMPDIR"],
+    "network": "offline",
+    "timeout_seconds": 300,
+    "cpu_seconds": 2400,
+    "max_processes": 512,
+    "max_file_size_bytes": 104857600
+  }
+}

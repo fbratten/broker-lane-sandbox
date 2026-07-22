@@ -5,10 +5,11 @@ boundary.** A small, dependency-free, default-deny sandbox that wraps the act of
 *running something* — a subprocess today, a local model or agent lane tomorrow — and
 returns a machine-readable JSON result. A **separate project** from `project-broker-loom`.
 
-> Status: **P2 (broker-loom ↔ sandbox CLI/JSON seam) complete — merged in #3 (`2a80000`).**
-> The sandbox-side seam is delivered; broker-loom-side consumption is the next slice. P1
-> safe-exec core remains adversarially reviewed. Personal-use MVP — fail-loud, no
-> enterprise/kernel hardening, no backward-compatibility promises.
+> Status: **P3 (local/quantized model runners, `bls infer`) delivered 2026-07-22 —
+> llama.cpp family + weight-free fake runner; ollama/transformers deferred. P2
+> (broker-loom ↔ sandbox CLI/JSON seam) complete — merged in #3 (`2a80000`); resource-limit
+> contract hardened in #5.** P1 safe-exec core remains adversarially reviewed. Personal-use
+> MVP — fail-loud, no enterprise/kernel hardening, no backward-compatibility promises.
 
 ---
 
@@ -67,9 +68,12 @@ the next slice on the broker-loom side.
   env-level neutralization, not a network namespace; filesystem access is not jailed.
 - It does **not** pin command identity (no `realpath`/hash of the binary) — it gates
   the **invocation name** and resolves it on `PATH`.
-- It does **not** download or run real models (P3); it does **not** stream (P4).
-  The sandbox-side broker-loom seam (P2, `bls broker-run`) is delivered, but
-  broker-loom-side consumption is not built here.
+- It does **not** download model weights — ever. Fetch is a separate, explicit,
+  operator-performed online step; `bls infer` executes already-fetched local weights
+  offline, only after existence + size + sha256 verification. It does **not** stream (P4).
+- It runs **local** models only (the llama.cpp family today, plus a weight-free fake
+  runner for CI; ollama/transformers deferred). Remote API models remain broker-loom's
+  verifier lane. Broker-loom-side infer consumption is not built here.
 - It is **not** enterprise-grade or multi-tenant; it is a single-operator personal tool.
 
 ## Safe-exec model (default-deny)
@@ -192,20 +196,20 @@ result schema, exit-code table, and worked examples.
 | **P0** | repo invariants — model-artifact guard, `.gitignore`, manifests, policy docs | ✅ done |
 | **P1** | safe-exec core — default-deny policy, env scrub, network policy, rlimits, `ExecResult`, preflight, `bls` CLI | ✅ done + adversarially reviewed |
 | **P2** | broker-loom ↔ sandbox CLI/JSON seam | ✅ done (merged in #3) |
-| **P3** | local/quantized model runners (env-driven cache) | ⏳ planned |
+| **P3** | local/quantized model runners (env-driven cache) — `bls infer`, llama.cpp family + fake runner; ollama/transformers deferred | ✅ delivered 2026-07-22 |
 | **P4** | streaming | ⏳ planned |
 
 P1 shipped with an adversarial review (4 lenses + per-finding skeptic verification);
 4 confirmed defects were fixed and re-verified (default-deny path bypass, timeout
 defeat, rlimit crash, guard fail-open). The suite has since grown with the P2 seam,
-the resource-limit contract hardening, and the 2026-07 finalization audit:
-**96 tests pass**, stdlib-only.
+the resource-limit contract hardening, the 2026-07 finalization audit, and the P3
+runner/infer surface: **233 tests pass** (observed 2026-07-22), stdlib-only.
 
 ## Develop
 
 ```bash
 git config core.hooksPath .githooks                  # enable the model-artifact guard
-python3 -m pytest tests/ -q                           # full suite (96 tests)
+python3 -m pytest tests/ -q                           # full suite (233 tests, 2026-07-22)
 python3 scripts/check_model_artifacts.py --tracked    # audit the tracked tree
 ```
 

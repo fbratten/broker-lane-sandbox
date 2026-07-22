@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "request_id": "loom-task-1234-turn-2",
+  "result": {
+    "status": "ok",
+    "ok": true,
+    "argv": [
+      "llama-completion",
+      "-m", "${SANDBOX_MODEL_DIR}/models/tiny-llama-q4.gguf",
+      "-f", "/dev/stdin",
+      "-no-cnv",
+      "--no-display-prompt",
+      "--simple-io",
+      "--log-disable",
+      "-n", "256",
+      "--temp", "0.2",
+      "--seed", "7"
+    ],
+    "reason": "",
+    "exit_code": 0,
+    "stdout": "- The notes cover ...\n- ...\n- ...\n",
+    "stderr": "",
+    "duration_ms": 8412,
+    "truncated": false,
+    "network": "offline",
+    "env_keys": ["HOME", "NO_PROXY", "PATH", "SANDBOX_NETWORK", "TMPDIR", "no_proxy"],
+    "limits": {
+      "resource_module": true,
+      "timeout_seconds": 300,
+      "cpu_seconds": 2400,
+      "address_space_bytes": null,
+      "max_processes": 512,
+      "max_file_size_bytes": 104857600,
+      "max_output_bytes": 1000000,
+      "enforced_rlimits": [
+        {"resource": 0, "value": 2400},
+        {"resource": 6, "value": 512},
+        {"resource": 1, "value": 104857600}
+      ]
+    },
+    "model": {
+      "profile": "tiny-llama-q4",
+      "runner": "llama.cpp",
+      "runner_binary": "llama-completion",
+      "runner_version": "llama-completion build 1234 (abcdef0)",
+      "relative_path": "models/tiny-llama-q4.gguf",
+      "sha256": "0f3a5b7c9d1e2f4a6b8c0d1e3f5a7b9c1d2e4f6a8b0c2d4e6f8a0b1c3d5e7f9a",
+      "sha256_verified": "cached",
+      "size_verified": true,
+      "is_fake": false,
+      "quantization": "Q4_K_M",
+      "context_length": 8192
+    },
+    "generation": {
+      "text": "- The notes cover ...\n- ...\n- ...\n",
+      "usage": {"prompt_chars": 1220, "completion_chars": 402},
+      "finish_reason": "unknown"
+    }
+  }
+}

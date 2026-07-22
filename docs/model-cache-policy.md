@@ -28,9 +28,15 @@ Local model paths are **config/env-driven**, never hardcoded, never committed:
 SANDBOX_MODEL_DIR   # root of the runtime model cache (outside git)
 ```
 
-Resolution: profile (manifest) -> `${SANDBOX_MODEL_DIR}/<relative path>` -> verify
-`sha256` -> load. Missing/mismatch fails loud. **Fetch is a separate, explicit,
-online step; execution runs offline** (see network policy). Execution never downloads.
+Resolution (implemented in P3, `modelcache.py`): profile (manifest) ->
+`${SANDBOX_MODEL_DIR}/<relative path>` (segment-checked and realpath-contained under
+the cache root — traversal and symlink escapes are refused) -> existence -> size ->
+verify `sha256` -> load. Missing/mismatch fails loud with a typed `reason_code`.
+Checksum verification uses a `<weight>.blsverify.json` sidecar cache: a full streaming
+sha256 on first use, on any size/`mtime_ns` drift, or on `--verify-full`; otherwise a
+size+mtime fast path reported truthfully as `sha256_verified: "cached"`. A mismatch
+never writes a sidecar. **Fetch is a separate, explicit, online step; execution runs
+offline** (see network policy). Execution never downloads.
 
 ## Enforcement
 
