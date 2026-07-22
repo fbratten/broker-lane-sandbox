@@ -9,6 +9,7 @@ carries `"is_fake": true`.
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 
@@ -36,6 +37,27 @@ class FakeRunner:
             "usage": {"prompt_chars": len(prompt), "completion_chars": len(text)},
             "is_fake": True,
         }
+
+    def generate_stream(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int = 256,
+        temperature: float | None = None,
+        seed: int | None = None,
+    ) -> Iterator[str]:
+        """Yield the SAME completion as :meth:`generate` in deterministic
+        fixed-size slices (P4 S10: proves incremental chunked emission without any
+        real model). ``"".join(generate_stream(p)) == generate(p)["text"]`` holds by
+        construction (identical text formula); sampling params are accepted for
+        Runner-protocol conformance and ignored exactly as in :meth:`generate`.
+        """
+        # Same canned formula as generate() -- kept in lockstep so the stream text
+        # and the non-stream completion can never diverge.
+        text = f"[fake:{self.profile}] received {len(prompt)} chars"
+        step = 5  # fixed-size character slices; only the final slice may be shorter
+        for i in range(0, len(text), step):
+            yield text[i:i + step]
 
     @property
     def requires_weights(self) -> bool:

@@ -35,6 +35,7 @@ from typing import Any
 
 from . import SCHEMA_VERSION
 from .policy import SandboxPolicy
+from .streaming import MAX_EVENT_TEXT_CHARS, StreamEmitter, run_llama_stream
 
 
 class InferRequestError(ValueError):
@@ -155,7 +156,11 @@ def _result(
 
 
 def run_infer_request(
-    payload: Any, *, preflight: bool = False, verify_full: bool = False
+    payload: Any,
+    *,
+    preflight: bool = False,
+    verify_full: bool = False,
+    stream_emitter: StreamEmitter | None = None,
 ) -> tuple[dict, int]:
     """Validate and run one infer request; return (wrapper, process_exit).
 
@@ -164,7 +169,29 @@ def run_infer_request(
     + verify weights -> resolve binary -> preflight short-circuit or execute via
     SafeExecutor. Request-shape problems raise InferRequestError (the CLI maps
     them to broker-run's request_error wrapper, exit 2).
+
+    Streaming (P4 S3/S13). ``stream_emitter=None`` (default) is byte-identical P3
+    -- the existing tests pass unmodified. When a :class:`StreamEmitter` is passed
+    the SAME result is computed and, at EVERY terminal, emitted as the unique
+    terminal ``final`` event (via :func:`_finalize`) carrying the exact wrapper the
+    non-stream path returns (S3). The llama EXECUTED path routes through
+    :func:`run_llama_stream` (which emits ``start`` after a successful spawn +
+    ``chunk``/``warning``) instead of ``run_llama``; the post-processing (A4 scrub,
+    status map, generation block) is identical. Pre-spawn failures
+    (request/model_error/denied/spawn_error) emit a single seq-0 ``final`` with no
+    prior ``start`` (S6). The prompt still reaches a real runner ONLY via child
+    stdin -- never argv/env (D3/F2), unchanged.
     """
+
+    def _finalize(wrapper: dict, process_exit: int) -> tuple[dict, int]:
+        """Terminal router (S3/S4): in stream mode emit the wrapper as the unique,
+        terminal ``final`` event before returning it; otherwise a pass-through so
+        the non-stream P3 result is byte-identical. EVERY terminal return in this
+        function routes through here; the fake path delegates its ``final`` here too."""
+        if stream_emitter is not None:
+            stream_emitter.final(wrapper)
+        return wrapper, process_exit
+
     # --- request validation (D4: closed key set, strict typing) --------------
     if not isinstance(payload, dict):
         raise InferRequestError("request must be a JSON object")
@@ -257,7 +284,7 @@ def run_infer_request(
             reason_code=exc.reason_code,  # type: ignore[attr-defined]
             network=policy.network,
         )
-        return _wrap(request_id, result), INFER_STATUS_EXIT["model_error"]
+        return _finalize(_wrap(request_id, result), INFER_STATUS_EXIT["model_error"])
 
     try:
         catalog_data = load_catalog_mapping(catalog_path)
@@ -293,7 +320,7 @@ def run_infer_request(
                 reason_code="unsupported_runner",
                 network=policy.network,
             )
-            return _wrap(request_id, result), INFER_STATUS_EXIT["model_error"]
+            return _finalize(_wrap(request_id, result), INFER_STATUS_EXIT["model_error"])
         return _run_fake(
             prof,
             prompt,
@@ -303,6 +330,8 @@ def run_infer_request(
             max_tokens=max_tokens,
             temperature=temperature,
             seed=seed,
+            stream_emitter=stream_emitter,
+            finalize=_finalize,
         )
 
     # --- llama.cpp family (D2/D3/D9): the only real runner at MVP ------------
@@ -368,18 +397,52 @@ def run_infer_request(
             network=policy.network,
             model=model_block,
         )
-        return _wrap(request_id, result), INFER_STATUS_EXIT["ok"]
+        # Preflight in stream mode: emit `start` then `final`, no chunks -- nothing
+        # spawns (S3). Without a stream_emitter this is a no-op.
+        if stream_emitter is not None:
+            stream_emitter.start(request_id, model_block)
+        return _finalize(_wrap(request_id, result), INFER_STATUS_EXIT["ok"])
 
     model_block["runner_version"] = probe_version(policy, binary_name)
-    exec_result, rec_argv, binary_name_run = run_llama(
-        policy,
-        resolved,
-        prompt,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        seed=seed,
-        cache_dir_env=cache_dir_env,  # preflight/execution labels always agree (A3)
-    )
+    if stream_emitter is not None:
+        # Streaming execution (S10/S13): run_llama_stream emits `start` (only after
+        # a successful spawn) + chunk/warning; it does NOT emit `final` (this layer
+        # owns the single source of truth for the result shape, incl. the A4 scrub).
+        # Mirror run_llama for the recorded/redacted argv: the binary is already
+        # resolved (binary_name); build the RAW argv, redact the model-path slot,
+        # and hand the RAW argv to the streaming runner (the child gets the real path).
+        raw_argv = build_argv(
+            binary_name,
+            resolved.abs_path,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            seed=seed,
+        )
+        rec_argv = recorded_argv(
+            raw_argv,
+            cache_dir_env=cache_dir_env,
+            relative_path=resolved.relative_path,
+            model_abs_path=resolved.abs_path,
+        )
+        binary_name_run = binary_name
+        exec_result = run_llama_stream(
+            policy,
+            raw_argv,
+            prompt,
+            emitter=stream_emitter,
+            request_id=request_id,
+            model_block=model_block,
+        )
+    else:
+        exec_result, rec_argv, binary_name_run = run_llama(
+            policy,
+            resolved,
+            prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            seed=seed,
+            cache_dir_env=cache_dir_env,  # preflight/execution labels always agree (A3)
+        )
     model_block["runner_binary"] = binary_name_run
 
     # A4 path hygiene: modern llama.cpp routes token text through the same
@@ -425,7 +488,7 @@ def run_infer_request(
         model=model_block,
         generation=generation,
     )
-    return _wrap(request_id, result), INFER_STATUS_EXIT[status]
+    return _finalize(_wrap(request_id, result), INFER_STATUS_EXIT[status])
 
 
 def _run_fake(
@@ -438,6 +501,8 @@ def _run_fake(
     max_tokens: int,
     temperature: float | None,
     seed: int | None,
+    stream_emitter: StreamEmitter | None = None,
+    finalize: Any = None,
 ) -> tuple[dict, int]:
     """Fake-runner path (D1/F4): NO SafeExecutor -- the fake runner runs
     in-process and exercises the seam, never the sandbox gates. Exec fields are
@@ -445,7 +510,19 @@ def _run_fake(
     can mistake it for a gated execution. No weights are resolved or hashed
     (``requires_weights`` is False); ``sha256_verified`` is therefore ``"none"``
     (contract amendment A1) -- never a dishonest "full"/"cached".
+
+    Streaming (P4 S3/S5): when ``stream_emitter`` is set the fake path emits
+    ``start`` (the fake gating already succeeded upstream; nothing spawns and
+    ``is_fake`` in the model block discloses it), then the completion as
+    ``chunk`` event(s) bounded by MAX_EVENT_TEXT_CHARS -- so
+    ``concat(chunk text) == generation.text`` (S5 self-check) -- and ``finalize``
+    emits the single terminal ``final``. Preflight emits ``start`` then ``final``
+    with no chunks (nothing runs). Without a stream_emitter ``finalize`` is the
+    pass-through and the P3 result is byte-identical.
     """
+    if finalize is None:
+        def finalize(wrapper: dict, process_exit: int) -> tuple[dict, int]:
+            return wrapper, process_exit
     model_block = {
         "profile": prof["name"],
         "runner": "fake",
@@ -467,7 +544,9 @@ def _run_fake(
             network=policy.network,
             model=model_block,
         )
-        return _wrap(request_id, result), INFER_STATUS_EXIT["ok"]
+        if stream_emitter is not None:
+            stream_emitter.start(request_id, model_block)  # start then final, no chunks
+        return finalize(_wrap(request_id, result), INFER_STATUS_EXIT["ok"])
 
     from .runners.fake_runner import FakeRunner
 
@@ -498,4 +577,12 @@ def _run_fake(
         model=model_block,
         generation=generation,
     )
-    return _wrap(request_id, result), INFER_STATUS_EXIT["ok"]
+    if stream_emitter is not None:
+        # start (after the fake gating) + the completion as chunk(s) bounded by
+        # MAX_EVENT_TEXT_CHARS; the chunk stream is the SAME text `generation.text`
+        # carries, so concat(chunk text) == generation.text (S5 self-check).
+        stream_emitter.start(request_id, model_block)
+        text = out["text"]
+        for i in range(0, len(text), MAX_EVENT_TEXT_CHARS):
+            stream_emitter.chunk(text[i:i + MAX_EVENT_TEXT_CHARS])
+    return finalize(_wrap(request_id, result), INFER_STATUS_EXIT["ok"])

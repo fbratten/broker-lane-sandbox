@@ -41,7 +41,7 @@ Enable the model-artifact guard and run the tests:
 
 ```bash
 git config core.hooksPath .githooks
-python3 -m pytest tests/ -q          # 233 tests (observed 2026-07-22)
+python3 -m pytest tests/ -q          # 282 tests (observed 2026-07-22)
 ```
 
 ## 2. Concepts
@@ -106,7 +106,7 @@ JSON in / JSON out. Global flag: `--pretty`.
 | `bls run --policy P [--timeout S] [--cwd D] -- ARGV…` | default-deny sandboxed run | `0` ok · `1` ran-but-nonzero · `2` denied/spawn-error · `124` timeout |
 | `bls models [--catalog C]` | list model manifests (no weights) | `0` ok · `2` catalog not found (pass `--catalog` on installed copies; the default path resolves only from a source checkout) |
 | `bls broker-run --request R` | P2 broker seam: JSON request in, JSON wrapper out | `0` ok · `1` ran-but-nonzero · `2` denied/spawn-error/request-error · `124` timeout |
-| `bls infer --request R [--preflight] [--verify-full]` | P3 local-model inference: JSON request in, JSON wrapper out — see §8 | `0` ok · `1` generation-error · `2` denied/spawn-error/model-error/request-error · `124` timeout |
+| `bls infer --request R [--preflight] [--verify-full] [--stream]` | P3 local-model inference (JSON wrapper), or with `--stream` the additive P4 JSONL event stream — see §8 | `0` ok · `1` generation-error · `2` denied/spawn-error/model-error/request-error · `124` timeout |
 
 `--timeout` / `--cwd` on `run` override the policy's `timeout_seconds` / `working_dir`
 for that invocation. Put the command after `--`.
@@ -289,6 +289,33 @@ allow-list the runner binary. See
   same envelope `schema_version`; the safe skew direction is unchanged: upgrade the
   sandbox before emitting a new field.
 
+### Streaming — `bls infer --stream` (P4)
+
+`bls infer --request R.json --stream` runs the **same** inference but emits a **JSONL
+event stream** on stdout instead of one buffered wrapper. It is **additive**: without
+`--stream`, `bls infer` is byte-identical to P3. Probe `bls version` `capabilities` for
+`"infer-stream"` before the first streaming call (an older sandbox lacks it).
+
+- **Events (one compact JSON object per line):** `start` (seq 0, once, carries the
+  `model` block), `chunk` (incremental generation `text`, split at 8192 chars),
+  `warning` (≤ 8, e.g. output-cap reached), `final` (once, last; `wrapper` is the exact
+  non-streaming response body — a run-result or a flat `request_error`). Every event
+  carries `{stream_version: 1, event, seq}`; `seq` is gapless from 0. `--pretty` is
+  ignored in stream mode (events are always compact single lines).
+- **Reconciliation.** The concatenation of all `chunk.text` equals the final
+  `generation.text` (and, on truncation, equals the capped prefix while the final text
+  is that prefix plus the truncation marker). The `final` wrapper is authoritative.
+- **No final = interrupted.** A stream that ends without a `final` event was interrupted
+  (crash, disconnect, kill); a consumer treats that as a failure, never success — and
+  ignores the process exit code in that case. `bls` exits 0 **iff** a `final` with
+  status `ok` was emitted.
+- **Bounded and honest.** The output cap does **not** kill the child — the relay stops
+  emitting, warns once, and drains the child to its natural exit (so an oversize
+  completion is `ok` + `truncated`, exactly as non-streaming). The wall-clock budget is
+  enforced by an independent watchdog plus deadline-bounded reads, so neither a stalled
+  consumer nor a pipe-holding escaped descendant can hang the call. `--preflight` and
+  `--stream` are mutually exclusive (a single `request_error` final).
+
 ## 9. Troubleshooting
 
 - **`PolicyError: unknown policy keys: [...]`** — a typo or stray field; policies fail
@@ -313,6 +340,6 @@ allow-list the runner binary. See
 | P1 | safe-exec core (policy, env scrub, network, limits, `ExecResult`, `bls`) | ✅ reviewed |
 | P2 | broker-loom ↔ sandbox CLI/JSON seam | ✅ merged (#3) |
 | P3 | local/quantized model runners (env-driven cache) — `bls infer`, llama.cpp family + fake; ollama/transformers deferred | ✅ delivered 2026-07-22 |
-| P4 | streaming | ⏳ |
+| P4 | streaming — `bls infer --stream`, additive JSONL events | ✅ delivered 2026-07-22 |
 
-Future P4 work lands via feature branches + PRs against `main`.
+Future work lands via feature branches + PRs against `main`.

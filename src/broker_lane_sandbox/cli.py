@@ -48,9 +48,12 @@ def cmd_version(args) -> int:
     _emit(
         {"name": "broker-lane-sandbox", "version": __version__,
          "schema_version": SCHEMA_VERSION,
-         # Contract D12: consumers MUST probe this list before the first `infer`
-         # call; an absent capabilities key means the P2 baseline (no infer).
-         "capabilities": ["run", "broker-run", "infer", "models", "preflight"]},
+         # Contract D12/P4 S1: consumers MUST probe this list before the first
+         # `infer` call; an absent capabilities key means the P2 baseline (no
+         # infer), present-without "infer-stream" means the P3 baseline (no
+         # `--stream`) -- both clean BLOCKED outcomes, never attempt-and-parse.
+         "capabilities": ["run", "broker-run", "infer", "models", "preflight",
+                          "infer-stream"]},
         args.pretty,
     )
     return 0
@@ -110,6 +113,19 @@ def cmd_broker_run(args) -> int:
     return _exit_for_result_status(wrapper["result"]["status"])
 
 
+def _read_request_id(request_path: str) -> str | None:
+    """Best-effort read of a request's correlation id for an early flag-level
+    error (the P4 S6 --preflight/--stream conflict), so the id is still echoed.
+    Any read/parse problem yields None; the real error surfaces via the flag check."""
+    try:
+        data = json.loads(Path(request_path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("request_id"), str):
+        return data["request_id"]
+    return None
+
+
 def cmd_infer(args) -> int:
     # Same boundary discipline as cmd_broker_run: request-shape problems become
     # broker-run's request_error wrapper (exit 2). ModelCacheError / RunnerError
@@ -117,6 +133,9 @@ def cmd_infer(args) -> int:
     from .broker_run import request_error
     from .infer import InferRequestError, run_infer_request
     from .policy import PolicyError
+
+    if args.stream:
+        return _cmd_infer_stream(args)
 
     request_id = None
     try:
@@ -135,6 +154,56 @@ def cmd_infer(args) -> int:
         return 2
 
     _emit(wrapper, args.pretty)
+    return exit_code
+
+
+def _cmd_infer_stream(args) -> int:
+    """`bls infer --stream`: the additive P4 JSONL transport (S2/S6). Every event
+    is a compact single-line JSON object via StreamEmitter -- ``--pretty`` is
+    IGNORED (S2). The terminal ``final`` is emitted exactly once: by
+    run_infer_request (through its stream_emitter) on the normal path, or here as a
+    single seq-0 ``final`` for a pre-emission failure (flag conflict, unreadable
+    request, or a validation error raised BEFORE any event is on the wire). A
+    failure AFTER ``start``/chunks are on the wire fails loud with NO ``final`` --
+    an absent final is the consumer's INTERRUPTED signal (S4/S6), never a duplicate.
+    """
+    from .broker_run import request_error
+    from .infer import InferRequestError, run_infer_request
+    from .policy import PolicyError
+    from .streaming import StreamEmitter
+
+    # S6: --preflight and --stream are mutually exclusive -> a single seq-0 final
+    # carrying the request_error wrapper, exit 2 (fail-loud, uniform-JSONL).
+    if args.preflight:
+        request_id = _read_request_id(args.request)
+        StreamEmitter(sys.stdout.write).final(
+            request_error("--preflight and --stream are mutually exclusive", request_id)
+        )
+        return 2
+
+    # Phase 1: read + parse the request. A pre-emission failure is a single final.
+    request_id = None
+    try:
+        data = json.loads(Path(args.request).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        StreamEmitter(sys.stdout.write).final(request_error(str(exc), request_id))
+        return 2
+    if isinstance(data, dict) and isinstance(data.get("request_id"), str):
+        request_id = data["request_id"]
+
+    # Phase 2: validate + run. InferRequestError/PolicyError/TypeError are raised
+    # during validation -- BEFORE run_infer_request emits any event -- so the
+    # emitter is pristine and a single seq-0 final is correct. run_infer_request
+    # itself emits start/chunk/... and the unique terminal final via the emitter,
+    # so on success we must NOT emit anything else -- just return its exit code.
+    emitter = StreamEmitter(sys.stdout.write)
+    try:
+        _wrapper, exit_code = run_infer_request(
+            data, verify_full=args.verify_full, stream_emitter=emitter
+        )
+    except (InferRequestError, PolicyError, TypeError) as exc:
+        emitter.final(request_error(str(exc), request_id))
+        return 2
     return exit_code
 
 
@@ -191,6 +260,10 @@ def build_parser() -> argparse.ArgumentParser:
                      help="verify model + resolve runner, execute nothing")
     inf.add_argument("--verify-full", action="store_true",
                      help="force a full sha256 re-verification of the weights")
+    inf.add_argument("--stream", action="store_true",
+                     help="emit the additive P4 JSONL event stream on stdout "
+                          "(start/chunk/warning/final); --pretty is ignored, and "
+                          "--stream is mutually exclusive with --preflight")
 
     return p
 
