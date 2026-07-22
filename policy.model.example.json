@@ -1,0 +1,24 @@
+{
+  "_comment": "Model-profile execution policy EXAMPLE (contract L4-F3). address_space_bytes is deliberately OMITTED: RLIMIT_AS gates the mmap of GGUF weights, so any cap below (weights + runtime overhead) kills the child with ENOMEM before it generates a token. If an operator insists on setting it, the honest floor is size_bytes + max(2 GiB, 30% of size_bytes). Do NOT inherit policy.example.json's 1 GiB / 10 s defaults for inference -- they are lethal for real models. Keys starting with '_' are comments and ignored by SandboxPolicy.from_mapping.",
+  "_comment_cpu_seconds": "cpu_seconds must be sized as n_threads x expected wall time (llama.cpp burns CPU on every thread): 8 threads x 300 s wall = 2400.",
+
+  "schema_version": 1,
+
+  "allow_exec": true,
+  "allowed_commands": ["llama-completion", "llama-cli"],
+
+  "env_allowlist": ["PATH", "HOME", "TMPDIR"],
+  "env_passthrough_prefixes": [],
+  "allow_secret_env": false,
+
+  "network": "offline",
+
+  "timeout_seconds": 300,
+  "max_output_bytes": 1000000,
+  "cpu_seconds": 2400,
+  "max_processes": 512,
+  "max_file_size_bytes": 104857600,
+
+  "working_dir": null,
+  "model_dir_env": "SANDBOX_MODEL_DIR"
+}

@@ -41,7 +41,7 @@ Enable the model-artifact guard and run the tests:
 
 ```bash
 git config core.hooksPath .githooks
-python3 -m pytest tests/ -q          # 96 tests
+python3 -m pytest tests/ -q          # 233 tests (observed 2026-07-22)
 ```
 
 ## 2. Concepts
@@ -101,11 +101,12 @@ JSON in / JSON out. Global flag: `--pretty`.
 
 | Command | Purpose | Exit codes |
 |--------|---------|-----------|
-| `bls version` | print name / version / schema_version | `0` |
+| `bls version` | print name / version / schema_version / capabilities — consumers MUST probe `capabilities` before the first `infer` call (an absent key = P2 baseline, no infer) | `0` |
 | `bls preflight --policy P` | inspect posture; **never executes** | `0` ok, `1` warnings |
 | `bls run --policy P [--timeout S] [--cwd D] -- ARGV…` | default-deny sandboxed run | `0` ok · `1` ran-but-nonzero · `2` denied/spawn-error · `124` timeout |
 | `bls models [--catalog C]` | list model manifests (no weights) | `0` ok · `2` catalog not found (pass `--catalog` on installed copies; the default path resolves only from a source checkout) |
 | `bls broker-run --request R` | P2 broker seam: JSON request in, JSON wrapper out | `0` ok · `1` ran-but-nonzero · `2` denied/spawn-error/request-error · `124` timeout |
+| `bls infer --request R [--preflight] [--verify-full]` | P3 local-model inference: JSON request in, JSON wrapper out — see §8 | `0` ok · `1` generation-error · `2` denied/spawn-error/model-error/request-error · `124` timeout |
 
 `--timeout` / `--cwd` on `run` override the policy's `timeout_seconds` / `working_dir`
 for that invocation. Put the command after `--`.
@@ -233,8 +234,60 @@ OPENROUTER_API_KEY=dummy-not-a-real-key \
 env-relative path — never weights. The default catalog is
 [`models.example.yaml`](../models.example.yaml) (requires PyYAML); a `.json` catalog
 works with the stdlib via `--catalog`. Local weights live under `${SANDBOX_MODEL_DIR}`
-(outside git) and are resolved + checksum-verified at load time (P3). See
+(outside git) and are resolved + checksum-verified at load time. See
 [model-cache-policy.md](model-cache-policy.md) and INVARIANT-1.
+
+### Local inference — `bls infer` (P3)
+
+`bls infer --request R.json` runs one local-model generation through the full safe-exec
+gate chain. The request carries: `schema_version` (1), optional `request_id`, `profile`
+(catalog profile name), `catalog` (path — explicit; catalogs are operator-tracked
+sha256-pinning data), `prompt` (a string — **data only**: it reaches the child
+exclusively via stdin, never argv or env), `params` (`max_tokens` required; optional
+`temperature` 0–2 and `seed`; unknown keys fail loud; `max_tokens` must respect the
+profile's `context_length`), optional `allow_fake`, and an inline `policy` that must
+allow-list the runner binary. See
+[`examples/infer_request.example.json`](../examples/infer_request.example.json) and
+[`examples/infer_result.ok.example.json`](../examples/infer_result.ok.example.json).
+
+- **Runners.** Closed registry: the `llama.cpp` family (binary candidates
+  `llama-completion`, then completion-mode `llama-cli` — the rewritten server-based
+  llama-cli chat client is not a supported flag surface) and the weight-free `fake`
+  runner. `fake` is refused unless the request sets `"allow_fake": true`, runs
+  in-process (it exercises the seam, **not** the sandbox gates), and marks its result
+  `"is_fake": true` with `sha256_verified: "none"`. Unknown families fail closed.
+- **Verification.** Per call, before spawn: cache-root env lookup → traversal-safe,
+  realpath-contained join (symlink escapes refused) → existence → size → sha256 via a
+  `<weight>.blsverify.json` sidecar cache (full streaming hash on first use, any
+  size/mtime drift, or `--verify-full`; otherwise a size+mtime fast path reported
+  truthfully as `sha256_verified: "cached"`). A mismatch never writes a sidecar.
+- **Statuses.** `ok` · `denied` · `model_error` (pre-spawn only, with `reason_code` ∈
+  catalog_invalid / unsupported_runner / model_dir_unset / model_missing /
+  size_mismatch / checksum_mismatch / runner_missing) · `spawn_error` ·
+  `generation_error` (child ran and failed — including in-child load failures past
+  checksum, with diagnostic stderr) · `timeout`. Stdout JSON is the source of truth;
+  process exit codes are coarse (see the table above).
+- **Preflight.** `--preflight` runs the entire validation/verification chain and binary
+  resolution, then stops — nothing is executed, `runner_version` stays null.
+- **Privacy.** The recorded `argv` self-labels the model path as
+  `${<cache_dir_env>}/<relative_path>` — no absolute local path appears in argv or the
+  model block; captured stdout/stderr are scrubbed of the absolute weight path and
+  cache root (replaced by their `${…}` label forms). No log flag is passed to the
+  runner — on modern llama.cpp builds `--log-disable` would silence generated token
+  text itself (upstream issue #10002).
+- **Policy guidance for model profiles.** Start from
+  [`policy.model.example.json`](../policy.model.example.json). **Omit
+  `address_space_bytes`**: llama.cpp mmaps weights by default and RLIMIT_AS gates mmap
+  (ENOMEM below model size + ~2 GiB headroom) — the generic `policy.example.json`
+  values (1 GiB AS, 10 s CPU) are lethal to real inference. Size `cpu_seconds` as
+  threads × expected wall time. Keep `PATH` in `env_allowlist` and put the runner
+  binary on PATH (e.g. a symlink from llama.cpp's `build/bin`).
+- **Platform.** The real-runner path is POSIX-only; the fake runner is cross-platform.
+- **Version skew.** On an older sandbox, `bls infer` fails as an argparse usage error
+  (exit 2, no stdout JSON) — probe `bls version` `capabilities` first, never
+  attempt-and-parse. New policy capabilities keep arriving as opt-in fields under the
+  same envelope `schema_version`; the safe skew direction is unchanged: upgrade the
+  sandbox before emitting a new field.
 
 ## 9. Troubleshooting
 
@@ -259,7 +312,7 @@ works with the stdlib via `--catalog`. Local weights live under `${SANDBOX_MODEL
 | P0 | repo invariants (model-artifact guard, manifests, policy docs) | ✅ |
 | P1 | safe-exec core (policy, env scrub, network, limits, `ExecResult`, `bls`) | ✅ reviewed |
 | P2 | broker-loom ↔ sandbox CLI/JSON seam | ✅ merged (#3) |
-| P3 | local/quantized model runners (env-driven cache) | ⏳ |
+| P3 | local/quantized model runners (env-driven cache) — `bls infer`, llama.cpp family + fake; ollama/transformers deferred | ✅ delivered 2026-07-22 |
 | P4 | streaming | ⏳ |
 
-Future P3/P4 work lands via feature branches + PRs against `main`.
+Future P4 work lands via feature branches + PRs against `main`.

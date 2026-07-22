@@ -8,6 +8,8 @@ reach the sandbox; it never imports the sandbox as a library. Subcommands:
   bls run       --policy POLICY -- ARGV...   # default-deny sandboxed execution
   bls broker-run --request REQUEST.json      # broker-loom JSON request seam
   bls models    [--catalog CATALOG]          # list model manifests (no weights)
+  bls infer     --request REQUEST.json [--preflight] [--verify-full]
+                                             # local-model inference seam (P3)
 
 Exit codes: 0 on a clean/OK outcome, non-zero on denial / timeout / error, so the
 caller can branch on the process status as well as parse the JSON body.
@@ -45,7 +47,10 @@ def _exit_for_result_status(status: str) -> int:
 def cmd_version(args) -> int:
     _emit(
         {"name": "broker-lane-sandbox", "version": __version__,
-         "schema_version": SCHEMA_VERSION},
+         "schema_version": SCHEMA_VERSION,
+         # Contract D12: consumers MUST probe this list before the first `infer`
+         # call; an absent capabilities key means the P2 baseline (no infer).
+         "capabilities": ["run", "broker-run", "infer", "models", "preflight"]},
         args.pretty,
     )
     return 0
@@ -105,6 +110,34 @@ def cmd_broker_run(args) -> int:
     return _exit_for_result_status(wrapper["result"]["status"])
 
 
+def cmd_infer(args) -> int:
+    # Same boundary discipline as cmd_broker_run: request-shape problems become
+    # broker-run's request_error wrapper (exit 2). ModelCacheError / RunnerError
+    # never escape run_infer_request -- they arrive here as model_error results.
+    from .broker_run import request_error
+    from .infer import InferRequestError, run_infer_request
+    from .policy import PolicyError
+
+    request_id = None
+    try:
+        data = json.loads(Path(args.request).read_text(encoding="utf-8"))
+        # Echo the correlation id back unchanged even when the request later fails
+        # validation (the contract guarantees this). Only a string request_id is valid.
+        if isinstance(data, dict) and isinstance(data.get("request_id"), str):
+            request_id = data["request_id"]
+        wrapper, exit_code = run_infer_request(
+            data, preflight=args.preflight, verify_full=args.verify_full
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError,
+            InferRequestError, PolicyError, TypeError) as exc:
+        wrapper = request_error(str(exc), request_id)
+        _emit(wrapper, args.pretty)
+        return 2
+
+    _emit(wrapper, args.pretty)
+    return exit_code
+
+
 def cmd_models(args) -> int:
     from .catalog import list_profiles
 
@@ -152,6 +185,13 @@ def build_parser() -> argparse.ArgumentParser:
     md.add_argument("--catalog", default=None,
                     help="catalog path (default: models.example.yaml)")
 
+    inf = sub.add_parser("infer", help="run a local-model inference JSON request")
+    inf.add_argument("--request", required=True, help="path to an infer request .json")
+    inf.add_argument("--preflight", action="store_true",
+                     help="verify model + resolve runner, execute nothing")
+    inf.add_argument("--verify-full", action="store_true",
+                     help="force a full sha256 re-verification of the weights")
+
     return p
 
 
@@ -167,6 +207,7 @@ def main(argv: list[str] | None = None) -> int:
         "run": cmd_run,
         "broker-run": cmd_broker_run,
         "models": cmd_models,
+        "infer": cmd_infer,
     }
     return handlers[args.command](args)
 

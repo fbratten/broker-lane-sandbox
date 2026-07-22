@@ -2,7 +2,10 @@
 
 Every sandbox operation returns a JSON-serializable result. broker-loom (or any
 caller) consumes these over the CLI/API seam -- never as Python objects. Keep the
-shape stable; bump SCHEMA_VERSION (in __init__) when the contract changes.
+shape stable. SCHEMA_VERSION (in __init__) is the CLI/API ENVELOPE version; result
+vocabularies are per-command (`run`/`broker-run` transport ExecResult; `bls infer`
+has its own InferResult vocabulary in infer.py) -- bump SCHEMA_VERSION only when
+the envelope itself changes incompatibly (contract D12).
 """
 from __future__ import annotations
 
@@ -10,7 +13,11 @@ from dataclasses import asdict, dataclass, field
 
 
 class Status:
-    """Stable result-status strings (the only values `ExecResult.status` takes)."""
+    """Stable result-status strings (the only values `ExecResult.status` takes).
+
+    This is the `run`/`broker-run` vocabulary. `bls infer` results carry their
+    own closed status enum, defined and mapped in infer.py (contract D12).
+    """
 
     OK = "ok"                       # process ran and exited 0
     EXIT_NONZERO = "exit_nonzero"   # process ran and exited non-zero
