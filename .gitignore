@@ -31,3 +31,8 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+
+# Internal operator lane-memory must never be tracked in the public repo.
+# (Any prior records are preserved in workspace memory + the pre-public provenance
+#  mirror; existing Git history is intentionally unchanged.)
+/ai-memory/
