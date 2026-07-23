@@ -101,10 +101,22 @@ def _child_path(bindir: Path) -> str:
     return str(bindir) + os.pathsep + system
 
 
+def _child_env(bindir: Path, model_root: Path) -> dict:
+    # INHERIT the parent environment (so the spawned interpreter locates the
+    # installed package exactly as the test-running interpreter does -- a
+    # minimal replacement env drops what CI needs and yields ModuleNotFound),
+    # then override PATH (stub first) + the model cache. Crucially STRIP
+    # PYTHONUNBUFFERED so correctness must come from the sandbox flush at the
+    # producer boundary, never an inherited consumer-side override.
+    env = dict(os.environ)
+    env["PATH"] = _child_path(bindir)
+    env["SANDBOX_MODEL_DIR"] = str(model_root)
+    env.pop("PYTHONUNBUFFERED", None)
+    return env
+
+
 def _spawn_stream(rp: Path, bindir: Path, model_root: Path) -> subprocess.Popen:
-    # Crucially NO PYTHONUNBUFFERED -- correctness must come from the sandbox
-    # flush at the producer boundary, not a consumer-side override.
-    env = {"PATH": _child_path(bindir), "SANDBOX_MODEL_DIR": str(model_root)}
+    env = _child_env(bindir, model_root)
     return subprocess.Popen(
         [sys.executable, "-c", _LAUNCH, "infer", "--request", str(rp), "--stream"],
         stdout=subprocess.PIPE,
@@ -155,7 +167,10 @@ sleep {sleep}
 
 
 def test_start_is_observable_over_a_pipe_before_final_no_consumer_unbuffer(tmp_path):
-    sleep_s = 2
+    # 3s child sleep leaves generous headroom over the fixed cost (subprocess
+    # spawn + import + full sha256 of the tiny fixture) so a loaded CI runner
+    # still delivers `start` inside half the sleep window.
+    sleep_s = 3
     catalog = _catalog(tmp_path)
     model_root = _model_root(tmp_path)
     bindir = _write_stub(tmp_path, _STUB_PRINT_THEN_SLEEP.format(sleep=sleep_s))
@@ -206,7 +221,7 @@ def test_pre_start_failure_final_is_flushed_and_immediate(tmp_path):
     model_root = _model_root(tmp_path)
     bindir = _write_stub(tmp_path, "#!/bin/sh\nprintf 'x\\n'\n")
     rp = _request(tmp_path, catalog)
-    env = {"PATH": _child_path(bindir), "SANDBOX_MODEL_DIR": str(model_root)}
+    env = _child_env(bindir, model_root)
     proc = subprocess.Popen(
         [sys.executable, "-c", _LAUNCH,
          "infer", "--request", str(rp), "--stream", "--preflight"],
