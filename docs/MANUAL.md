@@ -105,7 +105,9 @@ Notes:
 
 ## 4. The `bls` CLI
 
-JSON in / JSON out. Global flag: `--pretty`.
+JSON in / JSON out. `--pretty` is a **top-level global** flag: place it **before** the
+subcommand (`bls --pretty preflight ...`), never after it (a trailing `--pretty` is
+rejected by argparse).
 
 | Command | Purpose | Exit codes |
 |--------|---------|-----------|
@@ -206,8 +208,8 @@ A minimal policy (`policy.json`):
 ```
 
 ```bash
-# Inspect before running - no execution happens:
-bls preflight --policy policy.json --pretty
+# Inspect before running - no execution happens (--pretty is a top-level global, before the subcommand):
+bls --pretty preflight --policy policy.json
 
 # Run an allow-listed command (offline, scrubbed env, bounded):
 bls run --policy policy.json -- echo "hello"
