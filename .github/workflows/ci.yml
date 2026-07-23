@@ -9,7 +9,12 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  # The real work: one leg per supported Python version. The explicit `name`
+  # keeps the emitted check contexts as `test (3.10)` ... `test (3.13)` (the job
+  # id is renamed to `test-matrix` only so the stable aggregate below can own the
+  # `test` context that branch protection requires).
+  test-matrix:
+    name: test (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -33,3 +38,29 @@ jobs:
           bls preflight --policy policy.example.json
           bls run --policy policy.example.json -- echo ci-smoke
           bls models --catalog models.example.yaml
+
+  # Stable aggregate gate for branch protection. This emits the single `test`
+  # context that `main` protection requires, so a normal PR is mergeable without
+  # an admin override once the whole matrix is green -- instead of protection
+  # depending on the four volatile, matrix-expanded `test (3.x)` names.
+  #
+  # FAIL-CLOSED: it runs only after the entire matrix reaches a terminal state
+  # (`needs: test-matrix`), always runs so it can report a red result when the
+  # matrix did not fully pass (`if: always()`), and is green ONLY when the
+  # matrix job's aggregate result is exactly `success`. Any leg failure or
+  # cancellation, a skipped/incomplete matrix, or any non-success result makes
+  # this gate exit non-zero. It is not a cosmetic always-zero job.
+  test:
+    needs: test-matrix
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Require the full test matrix to have succeeded
+        run: |
+          result='${{ needs.test-matrix.result }}'
+          echo "test-matrix aggregate result: ${result} (required: success)"
+          if [ "${result}" != "success" ]; then
+            echo "::error::branch-protection gate: the test matrix did not fully succeed"
+            exit 1
+          fi
+          echo "all test-matrix legs succeeded"
