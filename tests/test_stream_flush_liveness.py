@@ -26,6 +26,16 @@ from pathlib import Path
 
 import pytest
 
+import broker_lane_sandbox
+
+# The directory that must be on the spawned interpreter's import path to find
+# the package. Derived from the ALREADY-importable module in THIS (pytest)
+# process, so it is correct whether the package is pip-installed (its
+# site-packages) or resolved from the src tree via pytest's pythonpath=src (the
+# CI Tests step installs the package only in a LATER step, so a fresh subprocess
+# would otherwise ModuleNotFound). __init__.py -> package dir -> its parent.
+_IMPORT_ROOT = str(Path(broker_lane_sandbox.__file__).resolve().parent.parent)
+
 # Fixture "weights": tiny text bytes, never a real model (INVARIANT-1).
 WEIGHTS = b"tiny fixture weights for the flush liveness test\n"
 WEIGHTS_SHA = hashlib.sha256(WEIGHTS).hexdigest()
@@ -111,6 +121,9 @@ def _child_env(bindir: Path, model_root: Path) -> dict:
     env = dict(os.environ)
     env["PATH"] = _child_path(bindir)
     env["SANDBOX_MODEL_DIR"] = str(model_root)
+    # Ensure the spawned interpreter can import broker_lane_sandbox regardless of
+    # whether it is pip-installed (CI installs it only after the test step).
+    env["PYTHONPATH"] = _IMPORT_ROOT + os.pathsep + env.get("PYTHONPATH", "")
     env.pop("PYTHONUNBUFFERED", None)
     return env
 
