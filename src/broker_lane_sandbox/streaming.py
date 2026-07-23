@@ -84,8 +84,21 @@ class StreamEmitter:
     ignored in stream mode, S2).
     """
 
-    def __init__(self, write: Callable[[str], None]) -> None:
+    def __init__(
+        self,
+        write: Callable[[str], None],
+        flush: Optional[Callable[[], None]] = None,
+    ) -> None:
         self._write = write
+        # Producer-boundary flush (P4 S7 liveness): on a pipe, sys.stdout is
+        # block-buffered, so without a per-event flush every event would sit in
+        # the sandbox's own buffer until process exit -- collapsing streaming
+        # to a single terminal burst and defeating the start-before-final
+        # liveness the transport exists to provide. The producer OWNS this
+        # flush; a consumer must NOT have to unbuffer the sandbox to see events
+        # arrive incrementally. Defaults to a no-op so in-process callers that
+        # capture into a list (tests) need not supply one.
+        self._flush = flush if flush is not None else (lambda: None)
         self._seq = 0
         self._started = False
         self._final = False
@@ -98,6 +111,9 @@ class StreamEmitter:
         # ensure_ascii keeps the line 7-bit and newline-free regardless of
         # chunk content; one object per line, "\n"-terminated (S2).
         self._write(json.dumps(obj, ensure_ascii=True) + "\n")
+        # Flush at the producer boundary so EVERY event (start included)
+        # reaches the pipe the instant it is emitted (S7 liveness).
+        self._flush()
         self._seq += 1
 
     def start(self, request_id: Optional[str], model: dict) -> None:

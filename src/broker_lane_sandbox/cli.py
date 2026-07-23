@@ -176,7 +176,7 @@ def _cmd_infer_stream(args) -> int:
     # carrying the request_error wrapper, exit 2 (fail-loud, uniform-JSONL).
     if args.preflight:
         request_id = _read_request_id(args.request)
-        StreamEmitter(sys.stdout.write).final(
+        StreamEmitter(sys.stdout.write, sys.stdout.flush).final(
             request_error("--preflight and --stream are mutually exclusive", request_id)
         )
         return 2
@@ -186,7 +186,9 @@ def _cmd_infer_stream(args) -> int:
     try:
         data = json.loads(Path(args.request).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        StreamEmitter(sys.stdout.write).final(request_error(str(exc), request_id))
+        StreamEmitter(sys.stdout.write, sys.stdout.flush).final(
+            request_error(str(exc), request_id)
+        )
         return 2
     if isinstance(data, dict) and isinstance(data.get("request_id"), str):
         request_id = data["request_id"]
@@ -196,7 +198,10 @@ def _cmd_infer_stream(args) -> int:
     # emitter is pristine and a single seq-0 final is correct. run_infer_request
     # itself emits start/chunk/... and the unique terminal final via the emitter,
     # so on success we must NOT emit anything else -- just return its exit code.
-    emitter = StreamEmitter(sys.stdout.write)
+    # sys.stdout.flush is wired so every event reaches the pipe when emitted
+    # (S7 liveness): on a pipe sys.stdout is block-buffered, so without this
+    # the whole stream would arrive as one burst at process exit.
+    emitter = StreamEmitter(sys.stdout.write, sys.stdout.flush)
     try:
         _wrapper, exit_code = run_infer_request(
             data, verify_full=args.verify_full, stream_emitter=emitter

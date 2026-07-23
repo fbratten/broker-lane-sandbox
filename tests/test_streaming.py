@@ -86,6 +86,34 @@ def test_emitter_constants_match_contract():
     assert MAX_WARNINGS == 8
 
 
+def test_emitter_flushes_at_the_producer_boundary_after_every_event():
+    # S7 liveness: the emitter flushes AFTER writing each event, so on a pipe
+    # every event (start included) reaches the consumer the instant it is
+    # emitted rather than sitting in the sandbox's own block buffer until exit.
+    # flush_at[i] records how many lines had been written when the i-th flush
+    # fired -- 1 flush per line, each immediately after its write.
+    lines: list[str] = []
+    flush_at: list[int] = []
+    em = StreamEmitter(lines.append, lambda: flush_at.append(len(lines)))
+    em.start("rid", {"is_fake": False})
+    em.chunk("alpha")
+    em.warning("heads up")
+    em.final({"schema_version": SCHEMA_VERSION, "request_id": "rid", "result": {}})
+    assert len(lines) == 4
+    assert flush_at == [1, 2, 3, 4]  # a flush followed every single write, in order
+
+
+def test_emitter_flush_defaults_to_noop_backward_compatible():
+    # The flush arg is optional: in-process callers that capture into a list
+    # (the whole grammar suite) construct StreamEmitter(write) with no flush and
+    # must keep working -- the default is a harmless no-op.
+    lines: list[str] = []
+    em = StreamEmitter(lines.append)
+    em.start("rid", {})
+    em.final({"ok": True})
+    assert [json.loads(x)["event"] for x in lines] == ["start", "final"]
+
+
 def test_emitter_seq_gapless_and_versioned():
     # S2/S4: single writer, gapless seq starting at 0; every event carries
     # {stream_version==1, event, seq}.
