@@ -1,4 +1,4 @@
-# broker-lane-sandbox — Threat Model
+# broker-lane-sandbox - Threat Model
 
 This document states what `broker-lane-sandbox` defends, against whom, and where its
 guarantees stop. It is deliberately honest about limitations: this is a **personal-use,
@@ -17,7 +17,7 @@ a kernel/container sandbox. Read it alongside the [README](../README.md) and
    an allow-listed *name* must not be able to front for an arbitrary on-disk binary.
 4. **The git repository.** Model weight blobs (and other large/sensitive runtime artifacts)
    must never enter version control (INVARIANT-1).
-5. **Honest reporting.** Every outcome — including refusals and failures — is a structured,
+5. **Honest reporting.** Every outcome - including refusals and failures - is a structured,
    serializable result, so the caller can never mistake a silent failure for success.
 
 ## 2. Trust boundaries
@@ -34,7 +34,7 @@ a kernel/container sandbox. Read it alongside the [README](../README.md) and
 
 - **Trusted (above the boundary):** the **caller** (broker-loom or the operator) that writes
   the policy and constructs `argv`; the policy file itself; the host OS and kernel. A trusted
-  caller can already run anything — the sandbox does not defend against its own operator.
+  caller can already run anything - the sandbox does not defend against its own operator.
 - **Confined (the boundary):** the **child** the sandbox spawns. The sandbox's entire job is
   to bound what *this* can see (env), reach (network), run (allow-list), and consume (limits).
 - **Untrusted (inside the child):** the content/data the child processes and any remote
@@ -44,7 +44,7 @@ a kernel/container sandbox. Read it alongside the [README](../README.md) and
 
 ## 3. Attacker model
 
-**In scope — what the sandbox is built to resist:** a **misbehaving or compromised child /
+**In scope - what the sandbox is built to resist:** a **misbehaving or compromised child /
 lane** that, once running, tries to:
 - read secrets from the inherited environment,
 - reach the network to phone home or exfiltrate,
@@ -55,19 +55,19 @@ lane** that, once running, tries to:
 **Explicitly OUT of scope (not defended):**
 - A **malicious caller/operator.** The caller authors the policy and `argv`; someone who
   controls those can already run anything directly. Crafting a path-bearing `argv[0]` or a
-  permissive policy is *above* the boundary — the sandbox is a guardrail against *accidents*,
+  permissive policy is *above* the boundary - the sandbox is a guardrail against *accidents*,
   not a defense against its trusted operator.
 - A **filesystem-write-capable adversary** doing PATH-shadowing / TOCTOU binary substitution.
   The allow-list gates the invocation **name** (resolved on `PATH`); it does **not** pin
   binary identity (`realpath`/hash).
-- **Kernel/hypervisor escape, side channels, or covert channels** — there is no kernel
+- **Kernel/hypervisor escape, side channels, or covert channels** - there is no kernel
   isolation to escape; the child runs as the same user with normal filesystem access.
 
 ## 4. Risk areas, mitigations, and limitations
 
 ### 4.1 Model-artifact risk (INVARIANT-1)
 - **Risk:** weight blobs (`.gguf`/`.safetensors`/…), HF/Ollama caches, or `llama.cpp` builds
-  committed to git — repo bloat, license/IP exposure, accidental redistribution.
+  committed to git - repo bloat, license/IP exposure, accidental redistribution.
 - **Mitigations:** `.gitignore` covers all cache dirs + weight extensions;
   `scripts/check_model_artifacts.py` runs as a **pre-commit hook** (`--staged`) and in **CI**
   (`--tracked`); even `git add -f` is refused; the guard **fails closed** (exit non-zero) if
@@ -84,7 +84,7 @@ lane** that, once running, tries to:
   COOKIE|AUTH`) are **dropped even if allow-listed** unless `allow_secret_env: true`;
   `ExecResult.env_keys` lists names **only, never values**; dropped secret names are reported.
 - **Limitation:** the secret-name filter is a **best-effort heuristic** blocklist, not an
-  exhaustive secret detector. The real protection is the default-empty allow-list — a secret
+  exhaustive secret detector. The real protection is the default-empty allow-list - a secret
   reaches the child only if the operator deliberately allow-lists its exact name (or sets
   `allow_secret_env`).
 
@@ -92,7 +92,7 @@ lane** that, once running, tries to:
 - **Risk:** a child phones home or exfiltrates over the network.
 - **Mitigations:** `network: offline` (the default) strips proxy variables and sets
   `NO_PROXY=*` + `SANDBOX_NETWORK=offline` as a clear signal to cooperating runners.
-- **Limitation (important):** this is **env-level, best-effort** neutralization — a
+- **Limitation (important):** this is **env-level, best-effort** neutralization - a
   **cooperation contract plus proxy removal, NOT a network namespace or firewall.** A
   determined child that opens raw sockets to hardcoded IPs is **not** blocked. True network
   isolation would require OS-level sandboxing (namespaces / seccomp), which is out of scope.
@@ -101,17 +101,18 @@ lane** that, once running, tries to:
 - **Risk:** runaway CPU/memory, fork bombs, runaway file writes, children that outlive the
   timeout, or a descendant that escapes the process group and holds the output pipe open.
 - **Mitigations:** the child starts a **new session** (`setsid`); **RLIMIT_CPU / RLIMIT_AS /
-  RLIMIT_NPROC / RLIMIT_FSIZE** are applied (POSIX, opt-in per policy field); a **wall-clock
+  RLIMIT_NPROC / RLIMIT_FSIZE** are applied (POSIX, opt-in per policy field), each installed
+  with **soft == hard** so the child cannot raise its own ceiling; a **wall-clock
   timeout** kills the whole **process group**
   (`killpg` + `SIGKILL`); the post-kill drain is **time-boxed** so an escaped descendant cannot
   pin `run()` open past the budget; output is truncated to a cap. Pre-spawn failures (missing
   exe, bad cwd, an rlimit above the host ceiling) return a `spawn_error` **result**, not a crash.
   Malformed limit values (booleans, strings, fractional floats) are rejected as `PolicyError`
-  — never silently coerced (JSON `true` is not "limit = 1").
+  - never silently coerced (JSON `true` is not "limit = 1").
 - **Limitations:** a child that **double-forks and `setsid`s** to escape the group survives the
   group kill (best-effort, documented); `RLIMIT_NPROC` is **per-UID** (a POSIX property), not
   per-job; `max_output_bytes` counts **characters**, not bytes; `max_file_size_bytes` caps each
-  **individual file** (SIGXFSZ), it is **not a disk quota** — many files each below the cap can
+  **individual file** (SIGXFSZ), it is **not a disk quota** - many files each below the cap can
   still consume disk; on non-POSIX hosts rlimits are
   unavailable and only the wall-clock timeout applies.
 
@@ -121,7 +122,7 @@ lane** that, once running, tries to:
   nothing permitted); commands are allow-listed by **bare name** and a **path-bearing `argv[0]`
   is refused**, so `/tmp/evil/python3` cannot pass an allow-list of `python3`. All gates run
   **before** any spawn; denials are results.
-- **Limitation:** no binary-identity pinning — `PATH` resolution decides which `python3` runs.
+- **Limitation:** no binary-identity pinning - `PATH` resolution decides which `python3` runs.
   A writable earlier-`PATH` entry is a host-integrity concern outside the boundary.
 
 ## 5. Mitigation summary
@@ -140,11 +141,11 @@ lane** that, once running, tries to:
   as the same user with normal filesystem access; the filesystem is **not** jailed (an
   allow-listed `cat` can read any readable path).
 - **Network "offline" is best-effort** env neutralization, not containment.
-- **No binary-identity pinning** — invocation names are gated and resolved on `PATH`.
-- **Heuristic secret filter** — exact-name allow-listing of a secret (or `allow_secret_env`)
+- **No binary-identity pinning** - invocation names are gated and resolved on `PATH`.
+- **Heuristic secret filter** - exact-name allow-listing of a secret (or `allow_secret_env`)
   still passes it.
 - **`max_output_bytes` is a character cap; `RLIMIT_NPROC` is per-UID; `max_file_size_bytes` is a per-file cap (SIGXFSZ), not a disk quota.**
-- **Single-operator MVP** — no multi-tenancy, no audit log signing, no formal verification.
+- **Single-operator MVP** - no multi-tenancy, no audit log signing, no formal verification.
 
 These limitations are intentional for the current scope (P1). Hardening toward OS-level
 isolation, binary pinning, or true network containment would be a separate, larger effort and

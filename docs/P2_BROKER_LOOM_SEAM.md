@@ -82,7 +82,7 @@ For valid requests, stdout is one wrapper object:
 
 `result` is the normal `ExecResult` schema. Denials, non-zero exits, timeouts, and spawn
 errors are still machine-readable results. `env_keys` lists the names the child actually
-received (sorted, names only) — it is environment-dependent, but in `offline` mode always
+received (sorted, names only) - it is environment-dependent, but in `offline` mode always
 includes `SANDBOX_NETWORK`, `NO_PROXY`, and `no_proxy`. `limits` is always populated for a
 result that ran; it is `{}` only for `denied` / `spawn_error`, which never start a child.
 
@@ -100,8 +100,22 @@ Malformed broker requests never spawn a child process. They emit JSON and exit `
 }
 ```
 
+Every request-shape check runs **before any child is spawned** (fail-loud at the seam).
+The exact `reason` strings are:
+
+- `request must be a JSON object`
+- `unknown request keys: [...]`
+- `request schema_version <value> != supported 1`
+- `request_id must be a string when set`
+- `argv must be a non-empty list of strings`
+- `stdin must be a string or null when set`
+- `policy must be an inline JSON object`
+
+plus any `PolicyError` message when the inline `policy` object itself is invalid (unknown
+keys, bad `schema_version`, non-positive limits, and so on).
+
 `request_error` is a wrapper status, not an `ExecResult.status`. `request_id` is echoed
-unchanged whenever the request provided one (a string) and the body parsed as JSON —
+unchanged whenever the request provided one (a string) and the body parsed as JSON -
 including on this error path. It is `null` when the request omitted `request_id`
 (as in the example above), supplied a non-string `request_id` (only string ids are
 echoed; the request is rejected with `request_error`), or when the request file
@@ -122,6 +136,20 @@ control-flow signal.
 
 ## Broker-loom Integration Rules
 
+- **Build the sandbox call from consumer-owned profiles, never from model output.** A
+  consumer MUST assemble every security-relevant field of the request - the `policy`
+  (`allowed_commands` allow-list, `env_allowlist` / `env_passthrough_prefixes`, `network`,
+  and the rlimit/limit fields), the `argv`, and the `working_dir` - **only** from fixed,
+  consumer-owned policy profiles that it controls and reviews. It MUST NOT let untrusted
+  model / LLM output, or free-form task text, author or mutate any of those fields. The
+  sandbox **trusts its caller**: it confines the child it spawns, but it does not (and
+  cannot) defend against a policy or argv that the caller was induced to build from
+  untrusted input - a hijacked or careless caller is *above* the trust boundary (see
+  [THREAT_MODEL](THREAT_MODEL.md), sections 2-3). Model output is **data to be executed
+  inside** a fixed profile, never a source of the profile itself. These profiles are a
+  **consumer-side** concept: `bls broker-run` takes an **inline `policy` object** and has
+  **no** notion of named profiles, so profile selection and templating live entirely in
+  `project-broker-loom`.
 - Call `bls broker-run --request ...` as a subprocess.
 - Treat stdout JSON as the source of truth.
 - Record `request_id`, exit code, and `result.status` in the broker ledger.

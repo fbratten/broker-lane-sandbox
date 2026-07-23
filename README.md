@@ -2,16 +2,18 @@
 
 **Safe execution boundary for broker lanes, plus the local/quantized-model runtime
 boundary.** A small, dependency-free, default-deny sandbox that wraps the act of
-*running something* — a subprocess today, a local model or agent lane tomorrow — and
+*running something* - a subprocess today, a local model or agent lane tomorrow - and
 returns a machine-readable JSON result. A **separate project** from `project-broker-loom`.
 
-> Status: **P4 (streaming, `bls infer --stream`) delivered 2026-07-22 — additive JSONL
-> event transport; the non-stream contract is unchanged. P3 (local/quantized model
-> runners, `bls infer`) delivered — llama.cpp family + weight-free fake runner;
-> ollama/transformers deferred. P2 (broker-loom ↔ sandbox CLI/JSON seam) complete —
-> merged in #3 (`2a80000`); resource-limit contract hardened in #5.** P1 safe-exec core
-> remains adversarially reviewed. Personal-use MVP — fail-loud, no enterprise/kernel
-> hardening, no backward-compatibility promises.
+> Status: **P0-P4 merged (head `19091b1`, 2026-07-23).** P4 (streaming, `bls infer
+> --stream`) delivered 2026-07-22 - additive JSONL event transport; the non-stream
+> contract is unchanged. P3 (local/quantized model runners, `bls infer`) delivered -
+> llama.cpp family + weight-free fake runner; ollama/transformers deferred. P2
+> (broker-loom <-> sandbox CLI/JSON seam) complete - merged in #3 (`2a80000`); the
+> resource-limit contract was hardened in #5. Post-P4 hardening: a producer-boundary
+> per-event stdout flush (PR #9) and a fail-closed aggregate `test` CI gate for branch
+> protection (PR #10).** P1 safe-exec core remains adversarially reviewed. Personal-use
+> MVP - fail-loud, no enterprise/kernel hardening, no backward-compatibility promises.
 
 ---
 
@@ -20,7 +22,7 @@ returns a machine-readable JSON result. A **separate project** from `project-bro
 `broker-lane-sandbox` is the component that owns **how a command is executed safely**.
 It takes a policy (what is allowed) and an `argv`, and runs it under a strict
 **default-deny** posture: nothing runs, no environment leaks, no network is assumed,
-and resource use is bounded — unless the policy explicitly grants it. Every outcome,
+and resource use is bounded - unless the policy explicitly grants it. Every outcome,
 including a refusal, comes back as a JSON `ExecResult` rather than an exception or a
 process crash.
 
@@ -30,7 +32,7 @@ the executor evolve (local model runners, streaming) without changing the contra
 
 ## Why it exists
 
-The broker (`broker-loom`) decides *what* should happen — it routes tasks between a
+The broker (`broker-loom`) decides *what* should happen - it routes tasks between a
 spec/verify lane and an execution lane and tracks state. But the broker must **not**
 execute untrusted-ish work inside its own process. Execution needs its own hardened
 boundary with one job: run the thing safely, scrub what it can see, bound what it can
@@ -43,14 +45,16 @@ a contract, where the execution-safety concern can be reviewed and hardened on i
 | | **broker-loom** (`project-broker-loom`) | **broker-lane-sandbox** (this repo) |
 |---|---|---|
 | Owns | orchestration, task state, ledger, routing, verifier-lane choice, handoff parsing, repair loops | safe execution, env scrubbing, network policy, process/resource limits, model-cache boundary |
-| Executes work in-process? | **No** | **Yes** — but only under a default-deny policy |
+| Executes work in-process? | **No** | **Yes** - but only under a default-deny policy |
 | Integration | calls the sandbox over the **CLI/API contract** (JSON in/out) | exposes that contract; never imports broker-loom |
 
 Architectural rule: in broker-loom, the **OpenRouter lane is a verifier/spec lane and
 never executes**. The **execution** lanes are what this sandbox wraps. The two repos
-are developed and versioned independently; the sandbox-side **P2** seam (`bls
-broker-run`, JSON request in / JSON wrapper out) is delivered — consuming it is
-the next slice on the broker-loom side.
+are developed and versioned independently. The sandbox-side seams are delivered - the
+**P2** `bls broker-run` seam plus the **P3/P4** `bls infer` / `bls infer --stream`
+seams (JSON request in / JSON wrapper out) - and broker-loom has already merged its
+consumers of them (broker-loom PR #20 for infer, PR #21 for streaming). Consuming the
+seam is no longer a future slice on the broker-loom side.
 
 ## What it does / does NOT do
 
@@ -62,21 +66,23 @@ the next slice on the broker-loom side.
   cooperating runners to stay offline).
 - Bounds the child with opt-in POSIX rlimits (CPU / address-space / processes /
   per-file write size) and a wall-clock timeout that kills the whole process group.
-- Returns a JSON `ExecResult` for every outcome — including denials and spawn errors.
+- Returns a JSON `ExecResult` for every outcome - including denials and spawn errors.
 - Keeps model **weights out of git** and resolves them from an env-driven runtime cache.
 
-**Does NOT (by design — these are out of scope, not bugs):**
+**Does NOT (by design - these are out of scope, not bugs):**
 - It is **not** a kernel/container sandbox. Network "offline" is best-effort
   env-level neutralization, not a network namespace; filesystem access is not jailed.
-- It does **not** pin command identity (no `realpath`/hash of the binary) — it gates
+- It does **not** pin command identity (no `realpath`/hash of the binary) - it gates
   the **invocation name** and resolves it on `PATH`.
-- It does **not** download model weights — ever. Fetch is a separate, explicit,
+- It does **not** download model weights - ever. Fetch is a separate, explicit,
   operator-performed online step; `bls infer` executes already-fetched local weights
   offline, only after existence + size + sha256 verification. Streaming is available
   additively via `bls infer --stream` (P4); the buffered `bls infer` contract is unchanged.
 - It runs **local** models only (the llama.cpp family today, plus a weight-free fake
   runner for CI; ollama/transformers deferred). Remote API models remain broker-loom's
-  verifier lane. Broker-loom-side infer consumption is not built here.
+  verifier lane. The infer/streaming consumer is deliberately not built in this repo - it
+  lives in `project-broker-loom`, which has already delivered it (broker-loom PR #20 infer,
+  PR #21 streaming). "Not built here" means it lives and ships there, not that it is pending.
 - It is **not** enterprise-grade or multi-tenant; it is a single-operator personal tool.
 
 ## Safe-exec model (default-deny)
@@ -102,16 +108,16 @@ Then the child runs with a scrubbed env, an isolated session (`setsid`), configu
 rlimits, and a wall-clock timeout. On timeout the **whole process group** is killed,
 and the recovery read is time-boxed so a descendant that escaped the group can't pin
 the call open. `stdout`/`stderr` are captured and truncated to the policy cap. **Policy
-denials are results, not crashes** — only genuinely unexpected internal failures raise.
+denials are results, not crashes** - only genuinely unexpected internal failures raise.
 
 `ExecResult` (JSON) carries: `status` (`ok` / `exit_nonzero` / `denied` / `timeout` /
 `spawn_error`), `ok`, `argv`, `reason`, `exit_code`, `stdout`, `stderr`, `duration_ms`,
-`truncated`, `network`, `env_keys` (names only — never values), and `limits`. See
+`truncated`, `network`, `env_keys` (names only - never values), and `limits`. See
 [`docs/MANUAL.md`](docs/MANUAL.md) for the full field table.
 
 ## Model-artifact invariant (INVARIANT-1)
 
-Downloaded / local / quantized model weights are **runtime cache only** — never in git:
+Downloaded / local / quantized model weights are **runtime cache only** - never in git:
 
 - Forbidden in git: `.gguf`, `.safetensors`, `.bin`, `.pt`, `.pth`, `.onnx`,
   `.mlmodel`, `.ckpt`, `.tflite`, HuggingFace cache, Ollama blobs, `llama.cpp` builds,
@@ -121,10 +127,10 @@ Downloaded / local / quantized model weights are **runtime cache only** — neve
 - Local model paths are **env-driven** (`SANDBOX_MODEL_DIR`), never committed.
 - Enforced by `scripts/check_model_artifacts.py` as a **pre-commit hook** and in **CI**
   (`--tracked`, see `.github/workflows/ci.yml`); even `git add -f weights.gguf` is
-  refused. The guard **fails closed** — if git itself errors or is absent, it exits
+  refused. The guard **fails closed** - if git itself errors or is absent, it exits
   non-zero rather than reporting a (false) clean tree.
 
-See `docs/model-cache-policy.md`. Tests use **fake fixtures / mocked runners** — never
+See `docs/model-cache-policy.md`. Tests use **fake fixtures / mocked runners** - never
 a real model file.
 
 ## Environment scrubbing
@@ -138,7 +144,7 @@ The child environment is built **from empty**:
   `PASSWD` / `CREDENTIAL` / `PRIVATE` / `SESSION` / `COOKIE` / `AUTH`) are **dropped
   even if allow-listed**, unless the policy sets `allow_secret_env: true`. Dropped
   names are reported (names only) in the result.
-- `ExecResult.env_keys` lists the names the child received — **never the values**.
+- `ExecResult.env_keys` lists the names the child received - **never the values**.
 
 ## Network policy
 
@@ -149,7 +155,7 @@ Default `network: "offline"`:
 - `NO_PROXY=*` and `SANDBOX_NETWORK=offline` are set as a clear signal to cooperating
   runners that they must not reach the network.
 
-This is **env-level, best-effort** neutralization — a cooperation contract plus proxy
+This is **env-level, best-effort** neutralization - a cooperation contract plus proxy
 removal, **not** a kernel network namespace. `network: "online"` opts out (sets
 `SANDBOX_NETWORK=online`, leaves proxies intact). Fetching model weights is a separate,
 explicit, online step; **execution runs offline**.
@@ -171,7 +177,7 @@ denied/error, 124 timeout):
 
 ```bash
 bls version                                          # name, version, schema_version
-bls preflight --policy policy.example.json           # inspect posture — no execution
+bls preflight --policy policy.example.json           # inspect posture - no execution
 bls run       --policy policy.example.json -- echo hi # default-deny sandboxed run
 bls models                                            # list model manifests (no weights)
 bls broker-run --request request.json                # broker-loom JSON request seam (P2)
@@ -196,23 +202,31 @@ result schema, exit-code table, and worked examples.
 
 | Phase | Scope | State |
 |------|-------|-------|
-| **P0** | repo invariants — model-artifact guard, `.gitignore`, manifests, policy docs | ✅ done |
-| **P1** | safe-exec core — default-deny policy, env scrub, network policy, rlimits, `ExecResult`, preflight, `bls` CLI | ✅ done + adversarially reviewed |
+| **P0** | repo invariants - model-artifact guard, `.gitignore`, manifests, policy docs | ✅ done |
+| **P1** | safe-exec core - default-deny policy, env scrub, network policy, rlimits, `ExecResult`, preflight, `bls` CLI | ✅ done + adversarially reviewed |
 | **P2** | broker-loom ↔ sandbox CLI/JSON seam | ✅ done (merged in #3) |
-| **P3** | local/quantized model runners (env-driven cache) — `bls infer`, llama.cpp family + fake runner; ollama/transformers deferred | ✅ delivered 2026-07-22 |
-| **P4** | streaming — `bls infer --stream`, additive JSONL events | ✅ delivered 2026-07-22 |
+| **P3** | local/quantized model runners (env-driven cache) - `bls infer`, llama.cpp family + fake runner; ollama/transformers deferred | ✅ delivered 2026-07-22 (PR #7) |
+| **P4** | streaming - `bls infer --stream`, additive JSONL events | ✅ delivered 2026-07-22 (PR #8) |
+
+Post-P4 hardening (on top of P4, not new phases): the streaming producer flushes stdout
+after **every** JSONL event, so start-before-final liveness is reliable at the source and
+a consumer needs no `PYTHONUNBUFFERED` workaround (PR #9); and CI adds a **fail-closed
+aggregate `test` gate** that is green only when the whole Python 3.10-3.13 matrix passes,
+giving branch protection one stable required check (PR #10).
 
 P1 shipped with an adversarial review (4 lenses + per-finding skeptic verification);
 4 confirmed defects were fixed and re-verified (default-deny path bypass, timeout
 defeat, rlimit crash, guard fail-open). The suite has since grown with the P2 seam,
-the resource-limit contract hardening, the 2026-07 finalization audit, and the P3
-runner/infer surface, and the P4 streaming transport: **282 tests pass** (observed 2026-07-22), stdlib-only.
+the resource-limit contract hardening, the 2026-07 finalization audit, the P3
+runner/infer surface, the P4 streaming transport, the producer-boundary per-event flush,
+and the stable aggregate CI gate: **286 tests pass** (2026-07-23, head `19091b1`),
+stdlib-only.
 
 ## Develop
 
 ```bash
 git config core.hooksPath .githooks                  # enable the model-artifact guard
-python3 -m pytest tests/ -q                           # full suite (282 tests, 2026-07-22)
+python3 -m pytest tests/ -q                           # full suite (286 tests, 2026-07-23)
 python3 scripts/check_model_artifacts.py --tracked    # audit the tracked tree
 ```
 
@@ -223,6 +237,6 @@ policies/catalogs; JSON works with the stdlib).
 
 ## License / status note
 
-Licensed under the **MIT License** — see [`LICENSE`](LICENSE). Personal-use project,
-provided as-is with no support or compatibility guarantees. Future P2/P3/P4 work lands
+Licensed under the **MIT License** - see [`LICENSE`](LICENSE). Personal-use project,
+provided as-is with no support or compatibility guarantees. Future work lands
 via feature branches + PRs against `main`.
