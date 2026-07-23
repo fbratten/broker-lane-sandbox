@@ -1,4 +1,4 @@
-# broker-lane-sandbox — Manual
+# broker-lane-sandbox - Manual
 
 A practical guide to the P1 safe-exec core and the P2 broker seam: the policy schema,
 the result schema, the `bls` CLI, the security model, and worked examples. For the
@@ -22,7 +22,7 @@ contract see [P2_BROKER_LOOM_SEAM.md](P2_BROKER_LOOM_SEAM.md).
 ## 1. Install / run
 
 Python ≥ 3.10. Zero runtime dependencies (PyYAML is optional, only for YAML policies /
-catalogs — JSON works with the stdlib).
+catalogs - JSON works with the stdlib).
 
 Run from a source checkout without installing:
 
@@ -41,21 +41,29 @@ Enable the model-artifact guard and run the tests:
 
 ```bash
 git config core.hooksPath .githooks
-python3 -m pytest tests/ -q          # 282 tests (observed 2026-07-22)
+python3 -m pytest tests/ -q          # 286 tests (2026-07-23, head 19091b1)
 ```
+
+CI (`.github/workflows/ci.yml`) runs the same suite plus the model-artifact guard
+(INVARIANT-1, `--tracked`) and an install smoke across the Python 3.10-3.13 matrix
+(check contexts `test (3.10)` ... `test (3.13)`), followed by a **fail-closed aggregate
+job named `test`** that is green **only** when the whole matrix succeeds. Branch
+protection can therefore require the single stable `test` check instead of the four
+volatile per-version contexts; any leg failure, cancellation, or an incomplete matrix
+makes the aggregate exit non-zero.
 
 ## 2. Concepts
 
-- **Policy** — a `SandboxPolicy`: the *only* thing that grants capability. Everything is
+- **Policy** - a `SandboxPolicy`: the *only* thing that grants capability. Everything is
   denied until the policy allows it. Canonical format is **JSON**; YAML is read only if
   PyYAML is installed. Unknown keys **fail loud** (keys starting with `_` are treated as
   comments and ignored).
-- **Executor** — `SafeExecutor(policy).run(argv)`: applies the gates, scrubs the env,
+- **Executor** - `SafeExecutor(policy).run(argv)`: applies the gates, scrubs the env,
   bounds the child, and returns an `ExecResult`. Never imported by the caller across the
-  trust boundary — reached via the CLI.
-- **Result** — a JSON-serializable `ExecResult`. A policy **denial is a result**, not an
+  trust boundary - reached via the CLI.
+- **Result** - a JSON-serializable `ExecResult`. A policy **denial is a result**, not an
   exception. Only genuinely unexpected internal failures raise.
-- **Runner** — pluggable model execution (P3). The shipped `FakeRunner` requires no
+- **Runner** - pluggable model execution (P3). The shipped `FakeRunner` requires no
   weights so tests never touch a real model.
 
 ## 3. Policy schema
@@ -65,7 +73,7 @@ A policy is a JSON object. Defaults are **default-deny**; you must opt in.
 | Field | Type | Default | Meaning |
 |------|------|---------|---------|
 | `schema_version` | int | `1` | must equal the supported version (fails loud otherwise) |
-| `allow_exec` | bool | `false` | master switch — `false` means **nothing spawns** |
+| `allow_exec` | bool | `false` | master switch - `false` means **nothing spawns** |
 | `allowed_commands` | string[] | `[]` | allow-list of **bare** command names (no path) |
 | `env_allowlist` | string[] | `["PATH","HOME","LANG","LC_ALL","TZ","TMPDIR"]` | exact env names passed to the child |
 | `env_passthrough_prefixes` | string[] | `[]` | env-name prefixes passed to the child |
@@ -90,7 +98,7 @@ See [`policy.example.json`](../policy.example.json).
 
 Notes:
 - **Bare command names only.** `allowed_commands: ["python3"]` permits `python3`
-  (resolved on `PATH`) but **not** `/usr/bin/python3` or `./python3` — a path-bearing
+  (resolved on `PATH`) but **not** `/usr/bin/python3` or `./python3` - a path-bearing
   `argv[0]` is denied so an allow-listed name can't front for an arbitrary file.
 - **Secret guard.** Names matching `KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|PRIVATE|
   SESSION|COOKIE|AUTH` are dropped from the child env unless `allow_secret_env: true`.
@@ -101,12 +109,12 @@ JSON in / JSON out. Global flag: `--pretty`.
 
 | Command | Purpose | Exit codes |
 |--------|---------|-----------|
-| `bls version` | print name / version / schema_version / capabilities — consumers MUST probe `capabilities` before the first `infer` call (an absent key = P2 baseline, no infer) | `0` |
+| `bls version` | print name / version / schema_version / capabilities - consumers MUST probe `capabilities` before the first `infer` call (an absent key = P2 baseline, no infer) | `0` |
 | `bls preflight --policy P` | inspect posture; **never executes** | `0` ok, `1` warnings |
 | `bls run --policy P [--timeout S] [--cwd D] -- ARGV…` | default-deny sandboxed run | `0` ok · `1` ran-but-nonzero · `2` denied/spawn-error · `124` timeout |
 | `bls models [--catalog C]` | list model manifests (no weights) | `0` ok · `2` catalog not found (pass `--catalog` on installed copies; the default path resolves only from a source checkout) |
 | `bls broker-run --request R` | P2 broker seam: JSON request in, JSON wrapper out | `0` ok · `1` ran-but-nonzero · `2` denied/spawn-error/request-error · `124` timeout |
-| `bls infer --request R [--preflight] [--verify-full] [--stream]` | P3 local-model inference (JSON wrapper), or with `--stream` the additive P4 JSONL event stream — see §8 | `0` ok · `1` generation-error · `2` denied/spawn-error/model-error/request-error · `124` timeout |
+| `bls infer --request R [--preflight] [--verify-full] [--stream]` | P3 local-model inference (JSON wrapper), or with `--stream` the additive P4 JSONL event stream - see §8 | `0` ok · `1` generation-error · `2` denied/spawn-error/model-error/request-error · `124` timeout |
 
 `--timeout` / `--cwd` on `run` override the policy's `timeout_seconds` / `working_dir`
 for that invocation. Put the command after `--`.
@@ -137,16 +145,16 @@ Every `run` emits one JSON object:
 | `duration_ms` | int | wall-clock duration |
 | `truncated` | bool | whether output was truncated |
 | `network` | string | `offline` / `online` |
-| `env_keys` | string[] | env **names** the child received — **never values** |
+| `env_keys` | string[] | env **names** the child received - **never values** |
 | `limits` | object | effective limits + any `dropped_secret_env` names |
 
 ## 6. Security model & threat boundary
 
-**Threat model:** the *caller* (e.g. broker-loom) is trusted — it writes the policy and
+**Threat model:** the *caller* (e.g. broker-loom) is trusted - it writes the policy and
 chooses the argv. The sandbox confines the **child** it spawns: which executable runs,
 what environment it sees, whether it should reach the network, and how much it can
 consume. It is a **guardrail against accidental / unintended commands and leakage**, and
-a bounded-resource executor — sized for a **single-operator personal tool**.
+a bounded-resource executor - sized for a **single-operator personal tool**.
 
 **What is enforced:**
 - Default-deny execution; bare-name allow-list (no path bypass).
@@ -161,16 +169,16 @@ a bounded-resource executor — sized for a **single-operator personal tool**.
 - Not a kernel/container sandbox: `network: offline` is env-level neutralization, **not**
   a network namespace; the filesystem is **not** jailed (an allow-listed `cat` can still
   read any absolute path).
-- No binary-identity pinning (`realpath`/hash) — the **invocation name** is gated and
+- No binary-identity pinning (`realpath`/hash) - the **invocation name** is gated and
   resolved on `PATH`. A writable earlier-`PATH` entry is a host-integrity concern outside
   the boundary.
 - `max_output_bytes` counts characters, not bytes; `RLIMIT_NPROC` is per-UID (a POSIX
   property), not per-job; `max_file_size_bytes` caps each **individual file** a child
-  writes (SIGXFSZ past the cap) — it is **not** a disk quota, so a child may still write
+  writes (SIGXFSZ past the cap) - it is **not** a disk quota, so a child may still write
   many files each below the cap.
 - Child output is decoded as UTF-8 with **replacement characters** for invalid bytes
   (`errors="replace"`), so a binary-emitting child still returns a JSON `ExecResult`
-  — raw bytes are not preserved.
+  - raw bytes are not preserved.
 
 These boundaries were confirmed by an adversarial review: the path-bypass, timeout-defeat,
 rlimit-crash, and guard-fail-open defects were real and fixed; the kernel/identity-pinning
@@ -198,7 +206,7 @@ A minimal policy (`policy.json`):
 ```
 
 ```bash
-# Inspect before running — no execution happens:
+# Inspect before running - no execution happens:
 bls preflight --policy policy.json --pretty
 
 # Run an allow-listed command (offline, scrubbed env, bounded):
@@ -230,28 +238,28 @@ OPENROUTER_API_KEY=dummy-not-a-real-key \
 
 ## 8. Model catalog
 
-`bls models` lists **manifests only** — runner, source URL, sha256, license, and the
-env-relative path — never weights. The default catalog is
+`bls models` lists **manifests only** - runner, source URL, sha256, license, and the
+env-relative path - never weights. The default catalog is
 [`models.example.yaml`](../models.example.yaml) (requires PyYAML); a `.json` catalog
 works with the stdlib via `--catalog`. Local weights live under `${SANDBOX_MODEL_DIR}`
 (outside git) and are resolved + checksum-verified at load time. See
 [model-cache-policy.md](model-cache-policy.md) and INVARIANT-1.
 
-### Local inference — `bls infer` (P3)
+### Local inference - `bls infer` (P3)
 
 `bls infer --request R.json` runs one local-model generation through the full safe-exec
 gate chain. The request carries: `schema_version` (1), optional `request_id`, `profile`
-(catalog profile name), `catalog` (path — explicit; catalogs are operator-tracked
-sha256-pinning data), `prompt` (a string — **data only**: it reaches the child
+(catalog profile name), `catalog` (path - explicit; catalogs are operator-tracked
+sha256-pinning data), `prompt` (a string - **data only**: it reaches the child
 exclusively via stdin, never argv or env), `params` (`max_tokens` required; optional
-`temperature` 0–2 and `seed`; unknown keys fail loud; `max_tokens` must respect the
+`temperature` 0-2 and `seed`; unknown keys fail loud; `max_tokens` must respect the
 profile's `context_length`), optional `allow_fake`, and an inline `policy` that must
 allow-list the runner binary. See
 [`examples/infer_request.example.json`](../examples/infer_request.example.json) and
 [`examples/infer_result.ok.example.json`](../examples/infer_result.ok.example.json).
 
 - **Runners.** Closed registry: the `llama.cpp` family (binary candidates
-  `llama-completion`, then completion-mode `llama-cli` — the rewritten server-based
+  `llama-completion`, then completion-mode `llama-cli` - the rewritten server-based
   llama-cli chat client is not a supported flag surface) and the weight-free `fake`
   runner. `fake` is refused unless the request sets `"allow_fake": true`, runs
   in-process (it exercises the seam, **not** the sandbox gates), and marks its result
@@ -264,32 +272,32 @@ allow-list the runner binary. See
 - **Statuses.** `ok` · `denied` · `model_error` (pre-spawn only, with `reason_code` ∈
   catalog_invalid / unsupported_runner / model_dir_unset / model_missing /
   size_mismatch / checksum_mismatch / runner_missing) · `spawn_error` ·
-  `generation_error` (child ran and failed — including in-child load failures past
+  `generation_error` (child ran and failed - including in-child load failures past
   checksum, with diagnostic stderr) · `timeout`. Stdout JSON is the source of truth;
   process exit codes are coarse (see the table above).
 - **Preflight.** `--preflight` runs the entire validation/verification chain and binary
-  resolution, then stops — nothing is executed, `runner_version` stays null.
+  resolution, then stops - nothing is executed, `runner_version` stays null.
 - **Privacy.** The recorded `argv` self-labels the model path as
-  `${<cache_dir_env>}/<relative_path>` — no absolute local path appears in argv or the
+  `${<cache_dir_env>}/<relative_path>` - no absolute local path appears in argv or the
   model block; captured stdout/stderr are scrubbed of the absolute weight path and
   cache root (replaced by their `${…}` label forms). No log flag is passed to the
-  runner — on modern llama.cpp builds `--log-disable` would silence generated token
+  runner - on modern llama.cpp builds `--log-disable` would silence generated token
   text itself (upstream issue #10002).
 - **Policy guidance for model profiles.** Start from
   [`policy.model.example.json`](../policy.model.example.json). **Omit
   `address_space_bytes`**: llama.cpp mmaps weights by default and RLIMIT_AS gates mmap
-  (ENOMEM below model size + ~2 GiB headroom) — the generic `policy.example.json`
+  (ENOMEM below model size + ~2 GiB headroom) - the generic `policy.example.json`
   values (1 GiB AS, 10 s CPU) are lethal to real inference. Size `cpu_seconds` as
   threads × expected wall time. Keep `PATH` in `env_allowlist` and put the runner
   binary on PATH (e.g. a symlink from llama.cpp's `build/bin`).
 - **Platform.** The real-runner path is POSIX-only; the fake runner is cross-platform.
 - **Version skew.** On an older sandbox, `bls infer` fails as an argparse usage error
-  (exit 2, no stdout JSON) — probe `bls version` `capabilities` first, never
+  (exit 2, no stdout JSON) - probe `bls version` `capabilities` first, never
   attempt-and-parse. New policy capabilities keep arriving as opt-in fields under the
   same envelope `schema_version`; the safe skew direction is unchanged: upgrade the
   sandbox before emitting a new field.
 
-### Streaming — `bls infer --stream` (P4)
+### Streaming - `bls infer --stream` (P4)
 
 `bls infer --request R.json --stream` runs the **same** inference but emits a **JSONL
 event stream** on stdout instead of one buffered wrapper. It is **additive**: without
@@ -299,37 +307,43 @@ event stream** on stdout instead of one buffered wrapper. It is **additive**: wi
 - **Events (one compact JSON object per line):** `start` (seq 0, once, carries the
   `model` block), `chunk` (incremental generation `text`, split at 8192 chars),
   `warning` (≤ 8, e.g. output-cap reached), `final` (once, last; `wrapper` is the exact
-  non-streaming response body — a run-result or a flat `request_error`). Every event
+  non-streaming response body - a run-result or a flat `request_error`). Every event
   carries `{stream_version: 1, event, seq}`; `seq` is gapless from 0. `--pretty` is
   ignored in stream mode (events are always compact single lines).
 - **Reconciliation.** The concatenation of all `chunk.text` equals the final
   `generation.text` (and, on truncation, equals the capped prefix while the final text
   is that prefix plus the truncation marker). The `final` wrapper is authoritative.
 - **No final = interrupted.** A stream that ends without a `final` event was interrupted
-  (crash, disconnect, kill); a consumer treats that as a failure, never success — and
+  (crash, disconnect, kill); a consumer treats that as a failure, never success - and
   ignores the process exit code in that case. `bls` exits 0 **iff** a `final` with
   status `ok` was emitted.
-- **Bounded and honest.** The output cap does **not** kill the child — the relay stops
+- **Bounded and honest.** The output cap does **not** kill the child - the relay stops
   emitting, warns once, and drains the child to its natural exit (so an oversize
   completion is `ok` + `truncated`, exactly as non-streaming). The wall-clock budget is
   enforced by an independent watchdog plus deadline-bounded reads, so neither a stalled
   consumer nor a pipe-holding escaped descendant can hang the call. `--preflight` and
   `--stream` are mutually exclusive (a single `request_error` final).
+- **Producer-boundary liveness (per-event flush).** The streaming producer flushes
+  stdout after **every** JSONL event (`start` included), so each event reaches the pipe
+  the instant it is emitted and a consumer observes `start` before `final` at the source.
+  A consumer does **not** need to run the sandbox under `PYTHONUNBUFFERED` (or any other
+  unbuffering wrapper) to get incremental liveness - the flush is owned by the producer,
+  not delegated to the reader.
 
 ## 9. Troubleshooting
 
-- **`PolicyError: unknown policy keys: [...]`** — a typo or stray field; policies fail
+- **`PolicyError: unknown policy keys: [...]`** - a typo or stray field; policies fail
   loud. Prefix intentional comment keys with `_`.
-- **`denied: argv[0] must be a bare command name ...`** — pass the bare name (`python3`),
+- **`denied: argv[0] must be a bare command name ...`** - pass the bare name (`python3`),
   not a path; the executor resolves it on `PATH`.
-- **`denied: command 'x' not in allowed_commands`** — add the bare name to
+- **`denied: command 'x' not in allowed_commands`** - add the bare name to
   `allowed_commands`.
-- **`spawn_error: could not start process: Exception occurred in preexec_fn.`** — a
+- **`spawn_error: could not start process: Exception occurred in preexec_fn.`** - a
   requested rlimit (`max_processes` / `cpu_seconds` / `address_space_bytes` / `max_file_size_bytes`) exceeds the
   host's hard ceiling. Lower it (check `ulimit -a`).
-- **`bls models` errors about PyYAML** — install `pip install pyyaml`, or pass a `.json`
+- **`bls models` errors about PyYAML** - install `pip install pyyaml`, or pass a `.json`
   catalog via `--catalog`.
-- **Guard exits 2 (`GUARD ERROR (failing closed)`)** — git is broken/absent or you ran
+- **Guard exits 2 (`GUARD ERROR (failing closed)`)** - git is broken/absent or you ran
   the guard outside a repo; it **fails closed** by design rather than reporting clean.
 
 ## 10. Roadmap
@@ -339,7 +353,7 @@ event stream** on stdout instead of one buffered wrapper. It is **additive**: wi
 | P0 | repo invariants (model-artifact guard, manifests, policy docs) | ✅ |
 | P1 | safe-exec core (policy, env scrub, network, limits, `ExecResult`, `bls`) | ✅ reviewed |
 | P2 | broker-loom ↔ sandbox CLI/JSON seam | ✅ merged (#3) |
-| P3 | local/quantized model runners (env-driven cache) — `bls infer`, llama.cpp family + fake; ollama/transformers deferred | ✅ delivered 2026-07-22 |
-| P4 | streaming — `bls infer --stream`, additive JSONL events | ✅ delivered 2026-07-22 |
+| P3 | local/quantized model runners (env-driven cache) - `bls infer`, llama.cpp family + fake; ollama/transformers deferred | ✅ delivered 2026-07-22 |
+| P4 | streaming - `bls infer --stream`, additive JSONL events | ✅ delivered 2026-07-22 |
 
 Future work lands via feature branches + PRs against `main`.
