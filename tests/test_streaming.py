@@ -1,6 +1,6 @@
 """P4 acceptance suite for `bls infer --stream` -- the JSONL streaming transport.
 
-Binding contract: ai-memory/bls-p4-streaming-contract-s01/P4-CONTRACT.md (S1-S14).
+Binding contract: the P4 streaming contract, clauses S1-S14.
 
 Trust model of THIS test module
 -------------------------------

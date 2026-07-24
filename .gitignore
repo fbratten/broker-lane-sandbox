@@ -32,7 +32,5 @@ __pycache__/
 build/
 dist/
 
-# Internal operator lane-memory must never be tracked in the public repo.
-# (Any prior records are preserved in workspace memory + the pre-public provenance
-#  mirror; existing Git history is intentionally unchanged.)
+# Local working notes are not part of this project.
 /ai-memory/

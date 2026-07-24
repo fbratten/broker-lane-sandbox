@@ -1,6 +1,6 @@
 """P3 runner-surface tests (runners/base.py, runners/llama_cpp.py, fake_runner).
 
-Contract: ai-memory/bls-p3-runner-contract-s01/P3-CONTRACT.md (v2, ACCEPTED).
+Contract: the accepted P3 runner-surface contract (v2).
 Clauses cited inline as [D1], [D3], [D5], [D7], [D9], [D10], [F2], [F9],
 [F11], [L4-F1], [L4-F2].
 
