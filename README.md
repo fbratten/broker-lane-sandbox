@@ -30,6 +30,15 @@ It is reached through a stable **CLI/API seam** (`bls`, JSON in / JSON out), nev
 imported as a library by its caller. That keeps the trust boundary explicit and lets
 the executor evolve (local model runners, streaming) without changing the contract.
 
+## How the execution boundary works
+
+![Flowchart showing a broker request passing through broker-lane-sandbox validation, bounded model execution, result verification, controlled failure paths and optional JSONL streaming](docs/images/broker-lane-sandbox-overview.jpg)
+
+*The broker supplies a task and inline policy. `broker-lane-sandbox` validates the
+request, executes the permitted local runner under bounded controls, and returns
+structured JSON or JSONL results. It is a controlled execution layer, not a kernel or
+container isolation boundary.*
+
 ## Why it exists
 
 The broker (`broker-loom`) decides *what* should happen - it routes tasks between a
