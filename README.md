@@ -32,7 +32,7 @@ the executor evolve (local model runners, streaming) without changing the contra
 
 ## How the execution boundary works
 
-![Flowchart showing a broker request passing through broker-lane-sandbox validation, bounded model execution, result verification, controlled failure paths and optional JSONL streaming](docs/images/broker-lane-sandbox-overview.jpg)
+![Flowchart showing a broker request passing through broker-lane-sandbox validation, bounded model execution, result verification, controlled failure paths and optional JSONL streaming, followed by a panel listing the actual ExecResult response fields](docs/images/broker-lane-sandbox-overview.jpg)
 
 *The broker supplies a task and inline policy. `broker-lane-sandbox` validates the
 request, executes the permitted local runner under bounded controls, and returns
