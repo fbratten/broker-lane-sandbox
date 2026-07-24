@@ -5,7 +5,7 @@ exact boundary a real consumer uses -- and the stdout is parsed as JSONL (one JS
 object per line). The suite is negative-control heavy and grammar-first: every event
 carries {stream_version==1, event, seq}; seq is 0,1,2,... gapless with a single
 writer; `start` is legal only as seq 0; `final` is the unique terminal (nothing may
-follow). Clause tags cite P4-CONTRACT.md S-clauses.
+follow). Clause tags cite the P4 streaming contract S-clauses.
 
 No network, no real weights (INVARIANT-1). The real-runner path is exercised with
 stub binaries that PRINT deterministic output and do NOT read stdin -- this proves
